@@ -3,7 +3,10 @@ use std::sync::Arc;
 use egui::{self, widgets};
 use tokio::sync::{Mutex, MutexGuard};
 
-use crate::api_helper::{HttpClientWrapper, LoginState};
+use crate::{
+    LoginState::AttemptingLogin,
+    api_helper::{HttpClientWrapper, LoginState},
+};
 
 pub struct WhiteboardApp {
     email_inputstring: String,
@@ -20,22 +23,30 @@ impl WhiteboardApp {
     }
 
     fn login_menu(&mut self, ui: &mut egui::Ui) {
-        ui.label("Log in:");
-        ui.separator();
-        ui.label("User Name:");
-        ui.text_edit_singleline(&mut self.email_inputstring);
-        ui.label("Password:");
-        let password_field =
-            egui::TextEdit::singleline(&mut self.password_inputstring).password(true);
-        ui.add(password_field);
-        if ui.button("LOG IN").clicked() {
-            let client = self.api_client.clone();
-            let email = self.email_inputstring.clone();
-            let password = self.password_inputstring.clone();
-            tokio::task::spawn_blocking(async move || {
-                client.lock().await.attemt_login(&email, &password);
-            });
+        let mut enabled = true;
+        if let AttemptingLogin = self.last_loginState {
+            enabled = false;
         }
+        ui.add_enabled_ui(enabled, |ui| {
+            ui.label("Log in:");
+            ui.separator();
+            ui.label("User Name:");
+            let email_field = egui::TextEdit::singleline(&mut self.email_inputstring);
+            ui.add(email_field);
+            ui.label("Password:");
+            let password_field =
+                egui::TextEdit::singleline(&mut self.password_inputstring).password(true);
+            ui.add(password_field);
+            if ui.button("LOG IN").clicked() {
+                let client = self.api_client.clone();
+                let email = self.email_inputstring.clone();
+                let password = self.password_inputstring.clone();
+                println!("amogus");
+                tokio::task::spawn(async move {
+                    client.lock().await.attemt_login(&email, &password).await;
+                });
+            }
+        });
     }
 
     fn user_menu(&mut self, ui: &mut egui::Ui) {}
