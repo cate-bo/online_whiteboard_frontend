@@ -3,10 +3,7 @@ use std::sync::Arc;
 use egui::{self, widgets};
 use tokio::sync::{Mutex, MutexGuard};
 
-use crate::{
-    LoginState::AttemptingLogin,
-    api_helper::{HttpClientWrapper, LoginState},
-};
+use crate::api_helper::{HttpClientWrapper, LoginState};
 
 pub struct WhiteboardApp {
     email_inputstring: String,
@@ -14,7 +11,7 @@ pub struct WhiteboardApp {
     password_inputstring: String,
     attemting_login: bool,
     api_client: Arc<Mutex<HttpClientWrapper>>,
-    last_loginState: LoginState,
+    last_login_state: LoginState,
 }
 
 impl WhiteboardApp {
@@ -24,13 +21,13 @@ impl WhiteboardApp {
 
     fn login_menu(&mut self, ui: &mut egui::Ui) {
         let mut enabled = true;
-        if let AttemptingLogin = self.last_loginState {
+        if let LoginState::AttemptingLogin = self.last_login_state.clone() {
             enabled = false;
         }
         ui.add_enabled_ui(enabled, |ui| {
             ui.label("Log in:");
             ui.separator();
-            ui.label("User Name:");
+            ui.label("Email:");
             let email_field = egui::TextEdit::singleline(&mut self.email_inputstring);
             ui.add(email_field);
             ui.label("Password:");
@@ -60,7 +57,7 @@ impl Default for WhiteboardApp {
             password_inputstring: "".to_owned(),
             attemting_login: false,
             api_client: Arc::new(Mutex::new(HttpClientWrapper::new())),
-            last_loginState: LoginState::LoggedOut,
+            last_login_state: LoginState::LoggedOut,
         }
     }
 }
@@ -75,11 +72,11 @@ impl eframe::App for WhiteboardApp {
                 });
                 match self.api_client.try_lock() {
                     Ok(guard) => {
-                        self.last_loginState = guard.loginState.clone();
+                        self.last_login_state = guard.login_state.clone();
                     }
                     _ => {}
                 }
-                match self.last_loginState {
+                match self.last_login_state {
                     LoginState::LoggedIn => {}
                     _ => {
                         egui::Popup::menu(&mut ui.button("log in"))

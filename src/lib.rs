@@ -1,3 +1,5 @@
+#![allow(warnings)]
+
 mod app;
 pub use app::WhiteboardApp;
 mod login_menu;

@@ -1,13 +1,13 @@
 use reqwest::Url;
 
-use crate::LoginState::{AttemptingLogin, LoggedIn, LoggedOut, LoginFailed};
-
 pub struct HttpClientWrapper {
     client: reqwest::Client,
-    pub loginState: LoginState,
+    pub login_state: LoginState,
     base_url: Url,
     login_url: Url,
 }
+
+pub struct User {}
 
 pub enum LoginState {
     LoggedIn,
@@ -19,10 +19,10 @@ pub enum LoginState {
 impl Clone for LoginState {
     fn clone(&self) -> Self {
         match self {
-            LoggedIn => LoggedIn,
-            AttemptingLogin => AttemptingLogin,
-            LoginFailed => LoginFailed,
-            LoggedOut => LoggedOut,
+            LoginState::LoggedIn => LoginState::LoggedIn,
+            LoginState::AttemptingLogin => LoginState::AttemptingLogin,
+            LoginState::LoginFailed => LoginState::LoginFailed,
+            LoginState::LoggedOut => LoginState::LoggedOut,
         }
     }
 }
@@ -33,11 +33,11 @@ impl HttpClientWrapper {
     }
 
     pub async fn attemt_login(&mut self, email: &String, password: &String) {
-        self.loginState = LoginState::AttemptingLogin;
+        self.login_state = LoginState::AttemptingLogin;
         println!("attempting login");
         let res = self
             .client
-            .post(self.base_url.clone())
+            .post(self.login_url.clone())
             .json(&serde_json::json!({
                 "email": email,
                 "password": password
@@ -46,11 +46,12 @@ impl HttpClientWrapper {
             .await;
         match res {
             Ok(response) => {
-                self.loginState = LoginState::LoggedIn;
-                println!("{response:#?}");
+                self.login_state = LoginState::LoggedIn;
+                let thing: String = response.text().await.unwrap();
+                println!("{thing:#?}");
             }
             Err(_) => {
-                self.loginState = LoginState::LoggedOut;
+                self.login_state = LoginState::LoggedOut;
                 println!("something went wrong");
             }
         }
@@ -62,7 +63,7 @@ impl Default for HttpClientWrapper {
         let temp = reqwest::Url::parse("https://localhost:7081/").unwrap();
         Self {
             client: reqwest::Client::new(),
-            loginState: LoginState::LoggedOut,
+            login_state: LoginState::LoggedOut,
             base_url: temp.clone(),
             login_url: temp.join("/login").unwrap(),
         }

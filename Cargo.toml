@@ -5,6 +5,7 @@ edition = "2024"
 include = ["**/*.rs", "Cargo.toml"]
 
 [dependencies]
+borrow = "2.0.0"
 eframe = "0.34.3"
 egui = "0.34.3"
 reqwest = { version = "0.13.4", features = ["json"] }
