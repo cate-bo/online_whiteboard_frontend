@@ -52,9 +52,9 @@ impl WhiteboardApp {
 impl Default for WhiteboardApp {
     fn default() -> Self {
         Self {
-            email_inputstring: "".to_owned(),
+            email_inputstring: "test@test.test".to_owned(),
             username_inputstring: "".to_owned(),
-            password_inputstring: "".to_owned(),
+            password_inputstring: "Test1_".to_owned(),
             attemting_login: false,
             api_client: Arc::new(Mutex::new(HttpClientWrapper::new())),
             last_login_state: LoginState::LoggedOut,

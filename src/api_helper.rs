@@ -1,4 +1,5 @@
 use reqwest::Url;
+use serde_json::{Result, Value};
 
 pub struct HttpClientWrapper {
     client: reqwest::Client,
@@ -48,7 +49,9 @@ impl HttpClientWrapper {
             Ok(response) => {
                 self.login_state = LoginState::LoggedIn;
                 let thing: String = response.text().await.unwrap();
-                println!("{thing:#?}");
+                let response_body: Value = serde_json::from_str(&thing).unwrap();
+
+                println!("{response_body:#?}");
             }
             Err(_) => {
                 self.login_state = LoginState::LoggedOut;
@@ -68,4 +71,8 @@ impl Default for HttpClientWrapper {
             login_url: temp.join("/login").unwrap(),
         }
     }
+}
+
+struct LoginInfo {
+    accessToken: String,
 }
