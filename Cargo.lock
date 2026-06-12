@@ -712,6 +712,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clone"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673234d576cd3cb6d2118b603cff4d4d209efb5c211b261a8eb6afa156590acc"
+dependencies = [
+ "fallible",
+]
+
+[[package]]
 name = "cmake"
 version = "0.1.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1189,6 +1198,15 @@ checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
  "event-listener",
  "pin-project-lite",
+]
+
+[[package]]
+name = "fallible"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fafcb2d30b26d22d1c106075c5ba12383bacef822bc27d6c0f1a3caac3d6b283"
+dependencies = [
+ "void",
 ]
 
 [[package]]
@@ -2597,6 +2615,7 @@ name = "online_whiteboard_frontend"
 version = "0.1.0"
 dependencies = [
  "borrow",
+ "clone",
  "eframe",
  "egui",
  "env_logger",
@@ -4122,6 +4141,12 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "void"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 
 [[package]]
 name = "walkdir"

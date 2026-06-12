@@ -1,3 +1,4 @@
+use clone;
 use reqwest::Url;
 use serde_json::{Result, Value};
 
@@ -10,23 +11,26 @@ pub struct HttpClientWrapper {
 
 pub struct User {}
 
+#[derive(Clone)]
 pub enum LoginState {
-    LoggedIn,
+    LoggedIn(LoginInfo),
     AttemptingLogin,
     LoginFailed,
     LoggedOut,
 }
 
+/*
 impl Clone for LoginState {
     fn clone(&self) -> Self {
         match self {
-            LoginState::LoggedIn => LoginState::LoggedIn,
+            LoginState::LoggedIn(info) => LoginState::LoggedIn(info.clone()),
             LoginState::AttemptingLogin => LoginState::AttemptingLogin,
             LoginState::LoginFailed => LoginState::LoginFailed,
             LoginState::LoggedOut => LoginState::LoggedOut,
         }
     }
 }
+*/
 
 impl HttpClientWrapper {
     pub fn new() -> Self {
@@ -47,11 +51,40 @@ impl HttpClientWrapper {
             .await;
         match res {
             Ok(response) => {
-                self.login_state = LoginState::LoggedIn;
-                let thing: String = response.text().await.unwrap();
+                let mut login_info = LoginInfo::default();
+                login_info.userName = response
+                    .headers()
+                    .iter()
+                    .find(|header| header.0.eq("name"))
+                    .unwrap()
+                    .1
+                    .to_str()
+                    .unwrap()
+                    .to_owned();
+                let thing: String = response.text().await.unwrap().clone();
                 let response_body: Value = serde_json::from_str(&thing).unwrap();
-
-                println!("{response_body:#?}");
+                login_info.accessToken = response_body
+                    .get("accessToken")
+                    .unwrap()
+                    .to_string()
+                    .trim_matches('"')
+                    .to_owned();
+                login_info.expiresIn = response_body.get("expiresIn").unwrap().as_i64().unwrap();
+                login_info.refreshToken = response_body
+                    .get("refreshToken")
+                    .unwrap()
+                    .to_string()
+                    .trim_matches('"')
+                    .to_owned();
+                login_info.tokenType = response_body
+                    .get("tokenType")
+                    .unwrap()
+                    .to_string()
+                    .trim_matches('"')
+                    .to_owned();
+                //let bla = login_info.accessToken;
+                self.login_state = LoginState::LoggedIn(login_info);
+                println!("successfully logged in");
             }
             Err(_) => {
                 self.login_state = LoginState::LoggedOut;
@@ -73,6 +106,11 @@ impl Default for HttpClientWrapper {
     }
 }
 
-struct LoginInfo {
+#[derive(Clone, Default, Debug)]
+pub struct LoginInfo {
+    userName: String,
     accessToken: String,
+    expiresIn: i64,
+    refreshToken: String,
+    tokenType: String,
 }

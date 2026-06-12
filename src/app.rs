@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use std::{hash::Hash, sync::Arc};
 
-use egui::{self, widgets};
+use egui::{self, Id, Popup, widgets};
 use tokio::sync::{Mutex, MutexGuard};
 
 use crate::api_helper::{HttpClientWrapper, LoginState};
@@ -20,6 +20,10 @@ impl WhiteboardApp {
     }
 
     fn login_menu(&mut self, ui: &mut egui::Ui) {
+        if let LoginState::LoggedIn(_) = self.last_login_state {
+            Popup::close_all(ui);
+            return;
+        }
         let mut enabled = true;
         if let LoginState::AttemptingLogin = self.last_login_state.clone() {
             enabled = false;
@@ -38,7 +42,7 @@ impl WhiteboardApp {
                 let client = self.api_client.clone();
                 let email = self.email_inputstring.clone();
                 let password = self.password_inputstring.clone();
-                println!("amogus");
+                self.last_login_state = LoginState::AttemptingLogin;
                 tokio::task::spawn(async move {
                     client.lock().await.attemt_login(&email, &password).await;
                 });
@@ -46,7 +50,9 @@ impl WhiteboardApp {
         });
     }
 
-    fn user_menu(&mut self, ui: &mut egui::Ui) {}
+    fn user_menu(&mut self, ui: &mut egui::Ui) {
+        ui.label("worky");
+    }
 }
 
 impl Default for WhiteboardApp {
@@ -76,10 +82,19 @@ impl eframe::App for WhiteboardApp {
                     }
                     _ => {}
                 }
+                let user_button_thing = ui.button("log in");
                 match self.last_login_state {
-                    LoginState::LoggedIn => {}
+                    LoginState::LoggedIn(_) => {
+                        let mut user_menu = egui::Popup::menu(&user_button_thing);
+                        user_menu = user_menu.id(Id::new("user_menu"));
+                        user_menu
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .show(|ui| self.user_menu(ui));
+                    }
                     _ => {
-                        egui::Popup::menu(&mut ui.button("log in"))
+                        let mut login_menu = egui::Popup::menu(&user_button_thing);
+                        login_menu = login_menu.id(Id::new("login_menu"));
+                        login_menu
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .show(|ui| self.login_menu(ui));
                     }
