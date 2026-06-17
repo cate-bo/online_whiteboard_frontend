@@ -1,25 +1,35 @@
 use std::{borrow::Cow, hash::Hash, sync::Arc};
 
 use egui::{self, Id, Popup, widgets};
+use signalr_client::SignalRClient;
 use tokio::sync::{Mutex, MutexGuard};
 
-use crate::network_handler::{LoginState, http_client_wrapper};
-use crate::signalr_client_wrapper;
+use crate::http_client_wrapper;
+use crate::http_client_wrapper::{HttpClientWrapper, LoginState};
+use crate::network_handler::{self, NetworkHandler};
+use crate::signalr_client_wrapper::SignalRClientWrapper;
 
 pub struct WhiteboardApp {
     email_inputstring: String,
     username_inputstring: String,
     password_inputstring: String,
     attemting_login: bool,
-    api_client: Arc<Mutex<http_client_wrapper>>,
-
+    network_handler: NetworkHandler,
     last_login_state: LoginState,
     show_register_menu: bool,
 }
 
 impl WhiteboardApp {
     pub fn new(c: &eframe::CreationContext<'_>) -> Self {
-        Default::default()
+        Self {
+            email_inputstring: "test@test.test".to_owned(),
+            username_inputstring: "".to_owned(),
+            password_inputstring: "Test1_".to_owned(),
+            attemting_login: false,
+            network_handler: NetworkHandler::new(),
+            last_login_state: LoginState::LoggedOut,
+            show_register_menu: false,
+        }
     }
 
     fn login_menu(&mut self, ui: &mut egui::Ui) {
@@ -44,7 +54,7 @@ impl WhiteboardApp {
                 self.show_register_menu = true;
             }
             if ui.button("LOG IN").clicked() {
-                let client = self.api_client.clone();
+                let client = self.network_handler.http_client.clone();
                 let username = self.username_inputstring.clone();
                 let email = self.email_inputstring.clone();
                 let password = self.password_inputstring.clone();
@@ -73,7 +83,7 @@ impl WhiteboardApp {
     fn user_menu(&mut self, ui: &mut egui::Ui) {
         ui.label("worky");
         if (ui.button("LOG OUT").clicked()) {
-            let client = self.api_client.clone();
+            let client = self.network_handler.http_client.clone();
             tokio::task::spawn(async move {
                 client.lock().await.logout().await;
             });
@@ -102,7 +112,7 @@ impl WhiteboardApp {
                 self.show_register_menu = false;
             }
             if ui.button("REGISTER").clicked() {
-                let client = self.api_client.clone();
+                let client = self.network_handler.http_client.clone();
                 let username = self.username_inputstring.clone();
                 let email = self.email_inputstring.clone();
                 let password = self.password_inputstring.clone();
@@ -119,20 +129,6 @@ impl WhiteboardApp {
     }
 }
 
-impl Default for WhiteboardApp {
-    fn default() -> Self {
-        Self {
-            email_inputstring: "test@test.test".to_owned(),
-            username_inputstring: "".to_owned(),
-            password_inputstring: "Test1_".to_owned(),
-            attemting_login: false,
-            api_client: Arc::new(Mutex::new(http_client_wrapper::new())),
-            last_login_state: LoginState::LoggedOut,
-            show_register_menu: false,
-        }
-    }
-}
-
 impl eframe::App for WhiteboardApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::Panel::top("top_panel").show_inside(ui, |ui| {
@@ -141,7 +137,7 @@ impl eframe::App for WhiteboardApp {
                     //stuff
                     ui.label("lalala");
                 });
-                match self.api_client.try_lock() {
+                match self.network_handler.http_client.try_lock() {
                     Ok(guard) => {
                         self.last_login_state = guard.login_state.clone();
                     }
