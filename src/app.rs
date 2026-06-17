@@ -3,14 +3,16 @@ use std::{borrow::Cow, hash::Hash, sync::Arc};
 use egui::{self, Id, Popup, widgets};
 use tokio::sync::{Mutex, MutexGuard};
 
-use crate::api_helper::{HttpClientWrapper, LoginState};
+use crate::network_handler::{LoginState, http_client_wrapper};
+use crate::signalr_client_wrapper;
 
 pub struct WhiteboardApp {
     email_inputstring: String,
     username_inputstring: String,
     password_inputstring: String,
     attemting_login: bool,
-    api_client: Arc<Mutex<HttpClientWrapper>>,
+    api_client: Arc<Mutex<http_client_wrapper>>,
+
     last_login_state: LoginState,
     show_register_menu: bool,
 }
@@ -124,7 +126,7 @@ impl Default for WhiteboardApp {
             username_inputstring: "".to_owned(),
             password_inputstring: "Test1_".to_owned(),
             attemting_login: false,
-            api_client: Arc::new(Mutex::new(HttpClientWrapper::new())),
+            api_client: Arc::new(Mutex::new(http_client_wrapper::new())),
             last_login_state: LoginState::LoggedOut,
             show_register_menu: false,
         }

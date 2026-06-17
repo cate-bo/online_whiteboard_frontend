@@ -1,8 +1,9 @@
 use clone;
 use reqwest::{Response, StatusCode, Url};
 use serde_json::{Result, Value};
+use signalr_client::SignalRClient;
 
-pub struct HttpClientWrapper {
+pub struct http_client_wrapper {
     client: reqwest::Client,
     pub login_state: LoginState,
     base_url: Url,
@@ -36,7 +37,7 @@ impl Clone for LoginState {
 }
 */
 
-impl HttpClientWrapper {
+impl http_client_wrapper {
     pub fn new() -> Self {
         Default::default()
     }
@@ -55,7 +56,7 @@ impl HttpClientWrapper {
             .await;
         match res {
             Ok(response) => {
-                let login_info = HttpClientWrapper::parse_token_response(response).await;
+                let login_info = http_client_wrapper::parse_token_response(response).await;
                 match login_info {
                     Some(info) => {
                         self.login_state = LoginState::LoggedIn(info);
@@ -127,7 +128,7 @@ impl HttpClientWrapper {
             .await;
         match res {
             Ok(response) => {
-                let login_info = HttpClientWrapper::parse_token_response(response).await;
+                let login_info = http_client_wrapper::parse_token_response(response).await;
                 match login_info {
                     Some(info) => {
                         self.login_state = LoginState::LoggedIn(info);
@@ -158,7 +159,7 @@ impl HttpClientWrapper {
     }
 }
 
-impl Default for HttpClientWrapper {
+impl Default for http_client_wrapper {
     fn default() -> Self {
         let temp = reqwest::Url::parse("https://localhost:7081/").unwrap();
         Self {
