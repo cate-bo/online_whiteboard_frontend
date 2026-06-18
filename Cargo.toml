@@ -13,6 +13,7 @@ reqwest = { version = "0.13.4", features = ["json"] }
 serde = "1.0.228"
 serde_json = "1.0.150"
 signalr-client = "0.3.2"
+signalrs-client = "0.1.1"
 tokio = { version = "1.52.3", features = ["full"] }
 
 # native:
