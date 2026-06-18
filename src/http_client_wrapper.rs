@@ -136,6 +136,14 @@ impl HttpClientWrapper {
             .json(&serde_json::json!({ "blabla": "blabla", }))
             .send()
             .await;
+        match res {
+            Ok(_) => {
+                println!("all good");
+            }
+            Err(_) => {
+                println!("something brokie");
+            }
+        }
         self.login_state = LoginState::LoggedOut;
     }
 }

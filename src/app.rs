@@ -6,15 +6,15 @@ use tokio::sync::{Mutex, MutexGuard};
 
 use crate::http_client_wrapper;
 use crate::http_client_wrapper::{HttpClientWrapper, LoginState};
-use crate::network_handler::{self, NetworkHandler};
 use crate::signalr_client_wrapper::SignalRClientWrapper;
+use crate::state_machine::{self, StateMachine};
 
 pub struct WhiteboardApp {
     email_inputstring: String,
     username_inputstring: String,
     password_inputstring: String,
     attemting_login: bool,
-    network_handler: Arc<Mutex<NetworkHandler>>,
+    state_machine: StateMachine,
     last_login_state: LoginState,
     show_register_menu: bool,
 }
@@ -22,11 +22,11 @@ pub struct WhiteboardApp {
 impl WhiteboardApp {
     pub fn new(c: &eframe::CreationContext<'_>) -> Self {
         Self {
-            email_inputstring: "test@test.test".to_owned(),
+            email_inputstring: "test4@test4.test4".to_owned(),
             username_inputstring: "".to_owned(),
-            password_inputstring: "Test1_".to_owned(),
+            password_inputstring: "Test4_".to_owned(),
             attemting_login: false,
-            network_handler: Arc::new(Mutex::new(NetworkHandler::new())),
+            state_machine: StateMachine::new(),
             last_login_state: LoginState::LoggedOut,
             show_register_menu: false,
         }
@@ -34,7 +34,7 @@ impl WhiteboardApp {
 
     fn login_menu(&mut self, ui: &mut egui::Ui) {
         let mut enabled = true;
-        if let LoginState::AttemptingLogin = self.last_login_state {
+        if let LoginState::AttemptingLogin = self.state_machine.last_login_state {
             enabled = false;
         }
         ui.add_enabled_ui(enabled, |ui| {
@@ -47,27 +47,28 @@ impl WhiteboardApp {
             let password_field =
                 egui::TextEdit::singleline(&mut self.password_inputstring).password(true);
             ui.add(password_field);
-            if let LoginState::LoginFailed = self.last_login_state {
+            if let LoginState::LoginFailed = self.state_machine.last_login_state {
                 ui.label("something went wrong");
             }
             if ui.link("register").clicked() {
                 self.show_register_menu = true;
             }
             if ui.button("LOG IN").clicked() {
-                let handler = self.network_handler.clone();
+                //let handler = self.state_machine.http_client.clone();
                 // let username = self.username_inputstring.clone();
                 let email = self.email_inputstring.clone();
                 let password = self.password_inputstring.clone();
-                // self.last_login_state = LoginState::AttemptingLogin;
-                tokio::task::spawn(async move {
-                    handler.lock().await.attempt_login(email, password);
-                });
+                // self.state_machine.last_login_state = LoginState::AttemptingLogin;
+                // tokio::task::spawn(async move {
+                //     handler.lock().await.attempt_login(&email, &password);
+                // });
+                self.state_machine.attempt_login(email, password);
             }
         });
     }
 
     fn login_or_register_menu(&mut self, ui: &mut egui::Ui) {
-        if let LoginState::LoggedIn(_) = self.last_login_state {
+        if let LoginState::LoggedIn(_) = self.state_machine.last_login_state {
             self.email_inputstring = "".to_owned();
             self.password_inputstring = "".to_owned();
             self.username_inputstring = "".to_owned();
@@ -83,7 +84,7 @@ impl WhiteboardApp {
     fn user_menu(&mut self, ui: &mut egui::Ui) {
         ui.label("worky");
         if (ui.button("LOG OUT").clicked()) {
-            let client = self.network_handler.http_client.clone();
+            let client = self.state_machine.http_client.clone();
             tokio::task::spawn(async move {
                 client.lock().await.logout().await;
             });
@@ -92,7 +93,7 @@ impl WhiteboardApp {
 
     fn register_menu(&mut self, ui: &mut egui::Ui) {
         let mut enabled = true;
-        if let LoginState::AttemptingRegister = self.last_login_state {
+        if let LoginState::AttemptingRegister = self.state_machine.last_login_state {
             enabled = false;
         }
         ui.add_enabled_ui(enabled, |ui| {
@@ -112,18 +113,20 @@ impl WhiteboardApp {
                 self.show_register_menu = false;
             }
             if ui.button("REGISTER").clicked() {
-                let client = self.network_handler.http_client.clone();
+                // let client = self.state_machine.http_client.clone();
                 let username = self.username_inputstring.clone();
                 let email = self.email_inputstring.clone();
                 let password = self.password_inputstring.clone();
-                self.last_login_state = LoginState::AttemptingRegister;
-                tokio::task::spawn(async move {
-                    client
-                        .lock()
-                        .await
-                        .attempt_register(&username, &email, &password)
-                        .await;
-                });
+                // self.state_machine.last_login_state = LoginState::AttemptingRegister;
+                // tokio::task::spawn(async move {
+                //     client
+                //         .lock()
+                //         .await
+                //         .attempt_register(&username, &email, &password)
+                //         .await;
+                // });
+                self.state_machine
+                    .attempt_register(username, email, password);
             }
         });
     }
@@ -131,19 +134,20 @@ impl WhiteboardApp {
 
 impl eframe::App for WhiteboardApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.state_machine.update_state();
         egui::Panel::top("top_panel").show_inside(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("settings", |ui| {
                     //stuff
                     ui.label("lalala");
                 });
-                match self.network_handler.http_client.try_lock() {
-                    Ok(guard) => {
-                        self.last_login_state = guard.login_state.clone();
-                    }
-                    _ => {}
-                }
-                match &self.last_login_state {
+                // match self.state_machine.http_client.try_lock() {
+                //     Ok(guard) => {
+                //         self.state_machine.last_login_state = guard.login_state.clone();
+                //     }
+                //     _ => {}
+                // }
+                match &self.state_machine.last_login_state {
                     LoginState::LoggedIn(login_info) => {
                         let user_button_thing = ui.button(&login_info.userName);
 

@@ -13,13 +13,13 @@ use crate::{
     signalr_client_wrapper::SignalRClientWrapper,
 };
 
-pub struct NetworkHandler {
+pub struct StateMachine {
     pub http_client: Arc<Mutex<HttpClientWrapper>>,
     pub last_login_state: LoginState,
     pub signalr_client: Arc<Mutex<SignalRClientWrapper>>,
 }
 
-impl NetworkHandler {
+impl StateMachine {
     pub fn new() -> Self {
         let temp = Self {
             http_client: Arc::new(Mutex::new(HttpClientWrapper::new())),
@@ -33,6 +33,12 @@ impl NetworkHandler {
         return temp;
     }
 
+    pub fn update_state(&mut self) {
+        if let Ok(guard) = self.http_client.try_lock() {
+            self.last_login_state = guard.login_state.clone();
+        }
+    }
+
     pub async fn connect(&self, login_state: LoginState) {
         let pointer = self.signalr_client.clone();
         let pointer2 = pointer.clone();
@@ -43,10 +49,28 @@ impl NetworkHandler {
         if let Some(_) = pointer2.lock().await.client {}
     }
 
-    pub async fn attempt_login(&mut self, email: String, password: String) {
+    pub fn attempt_login(&mut self, email: String, password: String) {
         let pointer = self.http_client.clone();
-        self.last_login_state = pointer.lock().await.attempt_login(&email, &password).await;
+        tokio::task::spawn(async move {
+            pointer.lock().await.attempt_login(&email, &password).await;
+        });
     }
 
-    pub async fn update_last_login_state(&mut self) {}
+    pub fn attempt_register(&mut self, username: String, email: String, password: String) {
+        let pointer = self.http_client.clone();
+        tokio::task::spawn(async move {
+            pointer
+                .lock()
+                .await
+                .attempt_register(&username, &email, &password)
+                .await;
+        });
+    }
+
+    pub fn logout(&mut self) {
+        let pointer = self.http_client.clone();
+        tokio::task::spawn(async move {
+            pointer.lock().await.logout().await;
+        });
+    }
 }
