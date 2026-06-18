@@ -15,7 +15,7 @@ impl HttpClientWrapper {
         Default::default()
     }
 
-    pub async fn attemt_login(&mut self, email: &String, password: &String) {
+    pub async fn attempt_login(&mut self, email: &String, password: &String) -> LoginState {
         self.login_state = LoginState::AttemptingLogin;
         println!("attempting login");
         let res = self
@@ -37,7 +37,7 @@ impl HttpClientWrapper {
                     }
                     None => {
                         self.login_state = LoginState::LoginFailed;
-                        println!("login failed")
+                        println!("login failed");
                     }
                 }
             }
@@ -46,6 +46,7 @@ impl HttpClientWrapper {
                 println!("login failed");
             }
         }
+        self.login_state.clone()
     }
 
     pub async fn parse_token_response(response: Response) -> Option<LoginInfo> {
@@ -86,7 +87,12 @@ impl HttpClientWrapper {
         return Some(login_info);
     }
 
-    pub async fn attempt_register(&mut self, username: &String, email: &String, password: &String) {
+    pub async fn attempt_register(
+        &mut self,
+        username: &String,
+        email: &String,
+        password: &String,
+    ) -> LoginState {
         self.login_state = LoginState::AttemptingRegister;
         println!("attempting register");
         let res = self
@@ -118,6 +124,8 @@ impl HttpClientWrapper {
                 println!("register failed");
             }
         }
+
+        self.login_state.clone()
     }
 
     pub async fn logout(&mut self) {

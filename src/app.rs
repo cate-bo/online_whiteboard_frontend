@@ -14,7 +14,7 @@ pub struct WhiteboardApp {
     username_inputstring: String,
     password_inputstring: String,
     attemting_login: bool,
-    network_handler: NetworkHandler,
+    network_handler: Arc<Mutex<NetworkHandler>>,
     last_login_state: LoginState,
     show_register_menu: bool,
 }
@@ -26,7 +26,7 @@ impl WhiteboardApp {
             username_inputstring: "".to_owned(),
             password_inputstring: "Test1_".to_owned(),
             attemting_login: false,
-            network_handler: NetworkHandler::new(),
+            network_handler: Arc::new(Mutex::new(NetworkHandler::new())),
             last_login_state: LoginState::LoggedOut,
             show_register_menu: false,
         }
@@ -54,13 +54,13 @@ impl WhiteboardApp {
                 self.show_register_menu = true;
             }
             if ui.button("LOG IN").clicked() {
-                let client = self.network_handler.http_client.clone();
-                let username = self.username_inputstring.clone();
+                let handler = self.network_handler.clone();
+                // let username = self.username_inputstring.clone();
                 let email = self.email_inputstring.clone();
                 let password = self.password_inputstring.clone();
-                self.last_login_state = LoginState::AttemptingLogin;
+                // self.last_login_state = LoginState::AttemptingLogin;
                 tokio::task::spawn(async move {
-                    client.lock().await.attemt_login(&email, &password).await;
+                    handler.lock().await.attempt_login(email, password);
                 });
             }
         });
