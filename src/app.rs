@@ -137,6 +137,7 @@ impl eframe::App for WhiteboardApp {
         self.state_machine.update_state();
         egui::Panel::top("top_panel").show_inside(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
+                //add dropdown fro boards
                 ui.menu_button("settings", |ui| {
                     //stuff
                     ui.label("lalala");

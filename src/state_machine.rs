@@ -7,7 +7,7 @@ use tokio::sync::{Mutex, MutexGuard};
 
 use crate::{
     http_client_wrapper::{
-        HttpClientWrapper,
+        HttpClientWrapper, IdAndNameWrapper,
         LoginState::{self, AttemptingLogin, AttemptingRegister, LoggedIn, LoggedOut},
     },
     signalr_client_wrapper::SignalRClientWrapper,
@@ -18,6 +18,8 @@ pub struct StateMachine {
     pub last_login_state: LoginState,
     pub signalr_client: Arc<Mutex<SignalRClientWrapper>>,
     pub connected: bool,
+    board_list_changed: bool,
+    pub board_list: Vec<IdAndNameWrapper>,
 }
 
 impl StateMachine {
@@ -27,6 +29,8 @@ impl StateMachine {
             last_login_state: LoggedOut,
             signalr_client: Arc::new(Mutex::new(SignalRClientWrapper::new(LoggedOut))),
             connected: false,
+            board_list_changed: false,
+            board_list: Vec::new(),
         };
         temp.connect();
         // let pointer = temp.signalr_client.clone();
@@ -37,21 +41,22 @@ impl StateMachine {
     }
 
     pub fn update_state(&mut self) {
+        let mut currently_logged_in = false;
+        let mut previously_logged_in = false;
         if let Ok(guard) = self.http_client.try_lock() {
-            let mut currently_logged_in = false;
             if let LoggedIn(_) = guard.login_state.clone() {
                 currently_logged_in = true;
             }
-            let mut previously_logged_in = false;
             if let LoggedIn(_) = self.last_login_state {
                 previously_logged_in = true;
             }
-            match (currently_logged_in, previously_logged_in) {
-                (true, false) => {}
-                (false, true) => {}
-                _ => {}
-            }
             self.last_login_state = guard.login_state.clone();
+        }
+        match (currently_logged_in, previously_logged_in) {
+            (true, false) | (false, true) => {
+                self.refresh_board_list();
+            }
+            _ => {}
         }
         if let Ok(guard) = self.signalr_client.try_lock() {
             if let Some(_) = guard.client {
@@ -60,6 +65,20 @@ impl StateMachine {
                 self.connected = false;
             }
         }
+        if self.board_list_changed {
+            if let Ok(guard) = self.http_client.try_lock() {
+                self.board_list = guard.boards.clone();
+                self.board_list_changed = false;
+            }
+        }
+    }
+
+    pub fn refresh_board_list(&mut self) {
+        self.board_list_changed = true;
+        let pointer = self.http_client.clone();
+        tokio::task::spawn(async move {
+            pointer.lock().await.get_board_list().await;
+        });
     }
 
     pub async fn connect(&self) {

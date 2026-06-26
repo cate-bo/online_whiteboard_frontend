@@ -1,13 +1,19 @@
 use reqwest::{Response, StatusCode, Url};
-use serde_json::{Result, Value};
+use serde_json::{
+    Result,
+    Value::{self, Array},
+    value,
+};
 
 pub struct HttpClientWrapper {
     client: reqwest::Client,
     pub login_state: LoginState,
+    pub boards: Vec<IdAndNameWrapper>,
     base_url: Url,
     login_url: Url,
     register_url: Url,
     logout_url: Url,
+    board_url: Url,
 }
 
 impl HttpClientWrapper {
@@ -146,6 +152,32 @@ impl HttpClientWrapper {
         }
         self.login_state = LoginState::LoggedOut;
     }
+
+    pub async fn get_board_list(&mut self) {
+        println!("fetching board list");
+        let res = self.client.get(self.board_url.clone()).send().await;
+        match res {
+            Ok(response) => {
+                let response_text = response.text().await.unwrap();
+                let response_body: Value = serde_json::from_str(&response_text).unwrap();
+                if let Array(values) = response_body {
+                    for value in values {
+                        if let Value::Object(map) = value {
+                            let mut board: IdAndNameWrapper = IdAndNameWrapper {
+                                id: 0,
+                                name: "".to_owned(),
+                            };
+                            board.id =
+                                i32::try_from(map.get("id").unwrap().as_i64().unwrap()).unwrap();
+                            board.name = map.get("name").unwrap().to_string();
+                            self.boards.push(board);
+                        }
+                    }
+                }
+            }
+            Err(_) => {}
+        }
+    }
 }
 
 impl Default for HttpClientWrapper {
@@ -154,10 +186,12 @@ impl Default for HttpClientWrapper {
         Self {
             client: reqwest::Client::new(),
             login_state: LoginState::LoggedOut,
+            boards: Vec::new(),
             base_url: temp.clone(),
             login_url: temp.join("/login").unwrap(),
             register_url: temp.join("/register").unwrap(),
             logout_url: temp.join("/logout").unwrap(),
+            board_url: temp.join("/boards").unwrap(),
         }
     }
 }
@@ -178,4 +212,10 @@ pub struct LoginInfo {
     expiresIn: i64,
     refreshToken: String,
     tokenType: String,
+}
+
+#[derive(Clone)]
+pub struct IdAndNameWrapper {
+    pub id: i32,
+    pub name: String,
 }
