@@ -1,10 +1,10 @@
 use std::{borrow::Cow, hash::Hash, sync::Arc};
 
-use egui::{self, Id, Popup, widgets};
+use egui::{self, Id, Modal, Popup, widgets};
 use signalr_client::SignalRClient;
 use tokio::sync::{Mutex, MutexGuard};
 
-use crate::http_client_wrapper;
+use crate::http_client_wrapper::{self, IdAndNameWrapper};
 use crate::http_client_wrapper::{HttpClientWrapper, LoginState};
 use crate::signalr_client_wrapper::SignalRClientWrapper;
 use crate::state_machine::{self, StateMachine};
@@ -13,10 +13,14 @@ pub struct WhiteboardApp {
     email_inputstring: String,
     username_inputstring: String,
     password_inputstring: String,
+    board_name_inputstring: String,
+    new_board_is_public: bool,
     attemting_login: bool,
     state_machine: StateMachine,
     last_login_state: LoginState,
     show_register_menu: bool,
+    selected_board: IdAndNameWrapper,
+    new_board_modal_open: bool,
 }
 
 impl WhiteboardApp {
@@ -25,10 +29,17 @@ impl WhiteboardApp {
             email_inputstring: "test4@test4.test4".to_owned(),
             username_inputstring: "".to_owned(),
             password_inputstring: "Test4_".to_owned(),
+            board_name_inputstring: "".to_owned(),
+            new_board_is_public: false,
             attemting_login: false,
             state_machine: StateMachine::new(),
             last_login_state: LoginState::LoggedOut,
             show_register_menu: false,
+            selected_board: IdAndNameWrapper {
+                id: 0,
+                name: "select board".to_owned(),
+            },
+            new_board_modal_open: false,
         }
     }
 
@@ -136,8 +147,25 @@ impl eframe::App for WhiteboardApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.state_machine.update_state();
         egui::Panel::top("top_panel").show_inside(ui, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                //add dropdown fro boards
+            // egui::MenuBar::new().ui(ui, |ui| {
+            ui.horizontal(|ui| {
+                //add dropdown for boards
+                egui::ComboBox::new("select board", "")
+                    .selected_text(self.selected_board.name.clone())
+                    .show_ui(ui, |ui| {
+                        for board in self.state_machine.board_list.clone() {
+                            ui.selectable_value(
+                                &mut self.selected_board,
+                                board.clone(),
+                                &board.name,
+                            );
+                        }
+                        if let LoginState::LoggedIn(_) = self.state_machine.last_login_state {
+                            if ui.button("+").clicked() {
+                                self.new_board_modal_open = true;
+                            }
+                        }
+                    });
                 ui.menu_button("settings", |ui| {
                     //stuff
                     ui.label("lalala");
@@ -169,5 +197,23 @@ impl eframe::App for WhiteboardApp {
                 }
             });
         });
+
+        if self.new_board_modal_open {
+            let modal = Modal::new(Id::new("new_board_modal")).show(ui.ctx(), |ui| {
+                ui.heading("new whiteboard");
+                ui.label("name:");
+                ui.text_edit_singleline(&mut self.board_name_inputstring);
+                ui.checkbox(&mut self.new_board_is_public, "public");
+                if ui.button("create").clicked() {
+                    self.state_machine.create_new_board(
+                        self.board_name_inputstring.clone(),
+                        self.new_board_is_public,
+                    );
+                }
+            });
+            if modal.should_close() {
+                self.new_board_modal_open = false;
+            }
+        }
     }
 }

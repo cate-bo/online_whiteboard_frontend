@@ -7,7 +7,7 @@ use tokio::sync::{Mutex, MutexGuard};
 
 use crate::{
     http_client_wrapper::{
-        HttpClientWrapper, IdAndNameWrapper,
+        CreateBoardState, HttpClientWrapper, IdAndNameWrapper,
         LoginState::{self, AttemptingLogin, AttemptingRegister, LoggedIn, LoggedOut},
     },
     signalr_client_wrapper::SignalRClientWrapper,
@@ -16,6 +16,7 @@ use crate::{
 pub struct StateMachine {
     pub http_client: Arc<Mutex<HttpClientWrapper>>,
     pub last_login_state: LoginState,
+    pub create_board_state: CreateBoardState,
     pub signalr_client: Arc<Mutex<SignalRClientWrapper>>,
     pub connected: bool,
     board_list_changed: bool,
@@ -24,15 +25,17 @@ pub struct StateMachine {
 
 impl StateMachine {
     pub fn new() -> Self {
-        let temp = Self {
+        let mut temp = Self {
             http_client: Arc::new(Mutex::new(HttpClientWrapper::new())),
             last_login_state: LoggedOut,
+            create_board_state: CreateBoardState::None,
             signalr_client: Arc::new(Mutex::new(SignalRClientWrapper::new(LoggedOut))),
             connected: false,
             board_list_changed: false,
             board_list: Vec::new(),
         };
         temp.connect();
+        temp.refresh_board_list();
         // let pointer = temp.signalr_client.clone();
         // tokio::task::spawn(async move {
         //     pointer.lock().await.connect(LoggedOut).await;
@@ -70,6 +73,15 @@ impl StateMachine {
                 self.board_list = guard.boards.clone();
                 self.board_list_changed = false;
             }
+        }
+        if let CreateBoardState::Attempting = self.create_board_state {
+            let mut success = false;
+            if let Ok(guard) = self.http_client.try_lock() {
+                if let CreateBoardState::Success = guard.create_board_state {
+                    success = true;
+                }
+            }
+            self.refresh_board_list();
         }
     }
 
@@ -116,6 +128,14 @@ impl StateMachine {
         let pointer = self.http_client.clone();
         tokio::task::spawn(async move {
             pointer.lock().await.logout().await;
+        });
+    }
+
+    pub fn create_new_board(&mut self, name: String, public: bool) {
+        self.create_board_state = CreateBoardState::Attempting;
+        let pointer = self.http_client.clone();
+        tokio::task::spawn(async move {
+            pointer.lock().await.create_board(name, public).await;
         });
     }
 }

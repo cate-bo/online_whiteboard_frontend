@@ -8,6 +8,7 @@ use serde_json::{
 pub struct HttpClientWrapper {
     client: reqwest::Client,
     pub login_state: LoginState,
+    pub create_board_state: CreateBoardState,
     pub boards: Vec<IdAndNameWrapper>,
     base_url: Url,
     login_url: Url,
@@ -153,11 +154,39 @@ impl HttpClientWrapper {
         self.login_state = LoginState::LoggedOut;
     }
 
+    pub async fn create_board(&mut self, name: String, public: bool) {
+        self.create_board_state = CreateBoardState::Attempting;
+        let res = self
+            .client
+            .post(self.board_url.clone())
+            .json(&serde_json::json!({
+                "name": name,
+                "isPublic": public,
+            }))
+            .send()
+            .await;
+        match res {
+            Ok(response) => {
+                if (response.status() != StatusCode::OK) {
+                    self.create_board_state = CreateBoardState::Failiure;
+                    return;
+                } else {
+                    self.create_board_state = CreateBoardState::Success;
+                    return;
+                }
+            }
+            Err(_) => {
+                self.create_board_state = CreateBoardState::Failiure;
+            }
+        }
+    }
+
     pub async fn get_board_list(&mut self) {
         println!("fetching board list");
         let res = self.client.get(self.board_url.clone()).send().await;
         match res {
             Ok(response) => {
+                self.boards.clear();
                 let response_text = response.text().await.unwrap();
                 let response_body: Value = serde_json::from_str(&response_text).unwrap();
                 if let Array(values) = response_body {
@@ -186,6 +215,7 @@ impl Default for HttpClientWrapper {
         Self {
             client: reqwest::Client::new(),
             login_state: LoginState::LoggedOut,
+            create_board_state: CreateBoardState::None,
             boards: Vec::new(),
             base_url: temp.clone(),
             login_url: temp.join("/login").unwrap(),
@@ -205,6 +235,14 @@ pub enum LoginState {
     LoggedOut,
 }
 
+#[derive(Clone)]
+pub enum CreateBoardState {
+    Success,
+    Attempting,
+    Failiure,
+    None,
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct LoginInfo {
     pub userName: String,
@@ -218,4 +256,10 @@ pub struct LoginInfo {
 pub struct IdAndNameWrapper {
     pub id: i32,
     pub name: String,
+}
+
+impl PartialEq for IdAndNameWrapper {
+    fn eq(&self, other: &Self) -> bool {
+        if (self.id == other.id) { true } else { false }
+    }
 }

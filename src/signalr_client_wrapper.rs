@@ -23,12 +23,19 @@ impl SignalRClientWrapper {
     pub async fn connect(&mut self, login_state: LoginState) -> Result<(), ()> {
         println!("attempting connection");
         let client_hub = Hub::default().method("test", test);
-        let connection_result = SignalRClient::builder("localhost")
+        let mut builder = SignalRClient::builder("localhost")
             .use_hub("socket")
             .use_port(7081)
-            .with_client_hub(client_hub)
-            .build()
-            .await;
+            .with_client_hub(client_hub);
+
+        if let LoginState::LoggedIn(info) = login_state {
+            let auth = Auth::Bearer {
+                token: info.accessToken,
+            };
+            builder = builder.use_authentication(auth);
+        }
+
+        let connection_result = builder.build().await;
         // let connection_result = SignalRClient::connect_with("localhost", "socket", |c| {
         //     if let LoggedIn(info) = login_state.clone() {
         //         c.authenticate_bearer(info.accessToken);
