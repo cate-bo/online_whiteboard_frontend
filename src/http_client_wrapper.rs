@@ -10,6 +10,7 @@ pub struct HttpClientWrapper {
     pub login_state: LoginState,
     pub create_board_state: CreateBoardState,
     pub boards: Vec<IdAndNameWrapper>,
+    pub boards_changed: bool,
     base_url: Url,
     login_url: Url,
     register_url: Url,
@@ -20,6 +21,11 @@ pub struct HttpClientWrapper {
 impl HttpClientWrapper {
     pub fn new() -> Self {
         Default::default()
+    }
+
+    pub fn give_boards(&mut self) -> Vec<IdAndNameWrapper> {
+        self.boards_changed = false;
+        self.boards.clone()
     }
 
     pub async fn attempt_login(&mut self, email: &String, password: &String) -> LoginState {
@@ -155,35 +161,45 @@ impl HttpClientWrapper {
     }
 
     pub async fn create_board(&mut self, name: String, public: bool) {
-        self.create_board_state = CreateBoardState::Attempting;
-        let res = self
-            .client
-            .post(self.board_url.clone())
-            .json(&serde_json::json!({
-                "name": name,
-                "isPublic": public,
-            }))
-            .send()
-            .await;
-        match res {
-            Ok(response) => {
-                if (response.status() != StatusCode::OK) {
+        if let LoginState::LoggedIn(info) = self.login_state.clone() {
+            println!("attempting board creation");
+            self.create_board_state = CreateBoardState::Attempting;
+            let res = self
+                .client
+                .post(self.board_url.clone())
+                .json(&serde_json::json!({
+                    "name": name,
+                    "isPublic": public,
+                }))
+                .header("Authorization", "Bearer ".to_owned() + &info.accessToken)
+                .send()
+                .await;
+            match res {
+                Ok(response) => {
+                    if (response.status() != StatusCode::OK) {
+                        self.create_board_state = CreateBoardState::Failiure;
+                        return;
+                    } else {
+                        self.create_board_state = CreateBoardState::Success;
+                        return;
+                    }
+                }
+                Err(_) => {
                     self.create_board_state = CreateBoardState::Failiure;
-                    return;
-                } else {
-                    self.create_board_state = CreateBoardState::Success;
-                    return;
                 }
             }
-            Err(_) => {
-                self.create_board_state = CreateBoardState::Failiure;
-            }
+        } else {
+            self.create_board_state = CreateBoardState::Failiure;
         }
     }
 
     pub async fn get_board_list(&mut self) {
         println!("fetching board list");
-        let res = self.client.get(self.board_url.clone()).send().await;
+        let mut builder = self.client.get(self.board_url.clone());
+        if let LoginState::LoggedIn(info) = self.login_state.clone() {
+            builder = builder.header("Authorization", "Bearer ".to_owned() + &info.accessToken);
+        }
+        let res = builder.send().await;
         match res {
             Ok(response) => {
                 self.boards.clear();
@@ -203,6 +219,7 @@ impl HttpClientWrapper {
                         }
                     }
                 }
+                self.boards_changed = true;
             }
             Err(_) => {}
         }
@@ -217,6 +234,7 @@ impl Default for HttpClientWrapper {
             login_state: LoginState::LoggedOut,
             create_board_state: CreateBoardState::None,
             boards: Vec::new(),
+            boards_changed: false,
             base_url: temp.clone(),
             login_url: temp.join("/login").unwrap(),
             register_url: temp.join("/register").unwrap(),
