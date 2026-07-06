@@ -5,9 +5,24 @@
 */
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
-#[tokio::main]
-async fn main() -> eframe::Result {
+//#[tokio::main]
+fn main() -> eframe::Result {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Unable to create Runtime");
+
+    let _enter = rt.enter();
+
+    std::thread::spawn(move || {
+        rt.block_on(async {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+            }
+        });
+    });
 
     let native_options = eframe::NativeOptions::default();
     eframe::run_native(
