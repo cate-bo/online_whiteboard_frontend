@@ -4,6 +4,7 @@ use egui::Plugin;
 use egui::{self, Id, Modal, Popup, widgets};
 use egui_async::{Bind, EguiAsyncPlugin, StateWithData};
 use reqwest::{Client, Error};
+use serde::{Deserialize, de};
 use signalrs_client::SignalRClient;
 
 use crate::http_client_helper;
@@ -25,11 +26,12 @@ pub struct WhiteboardApp {
     selected_board: IdAndNameWrapper,
     new_board: Bind<IdAndNameWrapper, String>,
     board_list: Vec<IdAndNameWrapper>,
+    previously_logged_in: bool,
 }
 
 impl WhiteboardApp {
     pub fn new(c: &eframe::CreationContext<'_>) -> Self {
-        Self {
+        let mut temp = Self {
             email_inputstring: "test4@test4.test4".to_owned(),
             username_inputstring: "".to_owned(),
             password_inputstring: "Test4_".to_owned(),
@@ -47,7 +49,24 @@ impl WhiteboardApp {
             },
             new_board: Bind::new(true),
             board_list: Vec::new(),
+            previously_logged_in: false,
+        };
+        temp.refresh_boards();
+        return temp;
+    }
+
+    fn login_changed(&mut self) {
+        self.refresh_boards();
+    }
+
+    fn refresh_boards(&mut self) {
+        let client = self.http_client.clone();
+        let mut accessToken: Option<String> = None;
+        if let StateWithData::Finished(info) = self.login.state() {
+            accessToken = Some(info.accessToken.clone());
         }
+        self.new_board_list
+            .request(async move { http_client_helper::get_board_list(&client, accessToken).await });
     }
 
     fn login_menu(&mut self, ui: &mut egui::Ui) {
@@ -72,15 +91,8 @@ impl WhiteboardApp {
                 self.show_register_menu = true;
             }
             if ui.button("LOG IN").clicked() {
-                //let handler = self.state_machine.http_client.clone();
-                // let username = self.username_inputstring.clone();
                 let email = self.email_inputstring.clone();
                 let password = self.password_inputstring.clone();
-                // self.state_machine.last_login_state = LoginState::AttemptingLogin;
-                // tokio::task::spawn(async move {
-                //     handler.lock().await.attempt_login(&email, &password);
-                // });
-
                 let client = self.http_client.clone();
                 self.login.request(async move {
                     http_client_helper::attempt_login(&client, &email, &password).await
@@ -95,6 +107,7 @@ impl WhiteboardApp {
             self.password_inputstring = "".to_owned();
             self.username_inputstring = "".to_owned();
             Popup::close_all(ui);
+            self.login_changed();
         }
         if (self.show_register_menu) {
             self.register_menu(ui);
@@ -110,6 +123,7 @@ impl WhiteboardApp {
             let mut throwaway = Bind::new(false);
             self.login.clear();
             throwaway.request(async move { http_client_helper::logout(&client).await });
+            self.login_changed();
         }
     }
 
@@ -139,14 +153,6 @@ impl WhiteboardApp {
                 let username = self.username_inputstring.clone();
                 let email = self.email_inputstring.clone();
                 let password = self.password_inputstring.clone();
-                // self.state_machine.last_login_state = LoginState::AttemptingRegister;
-                // tokio::task::spawn(async move {
-                //     client
-                //         .lock()
-                //         .await
-                //         .attempt_register(&username, &email, &password)
-                //         .await;
-                // });
                 self.login.request(async move {
                     http_client_helper::attempt_register(&client, &username, &email, &password)
                         .await
@@ -159,18 +165,35 @@ impl WhiteboardApp {
 impl eframe::App for WhiteboardApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.plugin_or_default::<egui_async::EguiAsyncPlugin>();
+        let mut currently_logged_in = false;
+        if let StateWithData::Finished(_) = self.login.state() {
+            currently_logged_in = true;
+        }
+        if (self.previously_logged_in ^ currently_logged_in) {
+            self.login_changed();
+            self.previously_logged_in = currently_logged_in;
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let previous_board = self.selected_board.clone();
+        if let StateWithData::Finished(new_boards) = self.new_board_list.state() {
+            self.board_list = new_boards.clone();
+            self.new_board_list.clear();
+        }
         egui::Panel::top("top_panel").show_inside(ui, |ui| {
-            // egui::MenuBar::new().ui(ui, |ui| {
             ui.horizontal(|ui| {
                 //add dropdown for boards
                 egui::ComboBox::new("select board", "")
                     .selected_text(self.selected_board.name.clone())
                     .show_ui(ui, |ui| {
-                        if let StateWithData::Finished(boards) = self.new_board_list.state() {
-                            for board in boards {
+                        if let StateWithData::Pending = self.new_board_list.state() {
+                            ui.horizontal(|ui| {
+                                ui.label("loading boards");
+                                ui.add(egui::Spinner::new());
+                            });
+                        } else {
+                            for board in &self.board_list {
                                 ui.selectable_value(
                                     &mut self.selected_board,
                                     board.clone(),
@@ -182,24 +205,12 @@ impl eframe::App for WhiteboardApp {
                                     self.new_board_modal_open = true;
                                 }
                             }
-                        } else {
-                            ui.horizontal(|ui| {
-                                ui.label("loading boards");
-                                ui.add(egui::Spinner::new());
-                            });
                         }
                     });
 
                 ui.menu_button("settings", |ui| {
-                    //stuff
                     ui.label("lalala");
                 });
-                // match self.state_machine.http_client.try_lock() {
-                //     Ok(guard) => {
-                //         self.state_machine.last_login_state = guard.login_state.clone();
-                //     }
-                //     _ => {}
-                // }
                 match &self.login.state() {
                     StateWithData::Finished(info) => {
                         let user_button_thing = ui.button(&info.userName);
@@ -257,5 +268,25 @@ impl eframe::App for WhiteboardApp {
                 }
             }
         }
+
+        if (self.selected_board != previous_board) {
+            if (self.selected_board.id != 0) {
+                //handle board selection
+            }
+        }
     }
+}
+
+#[derive(Deserialize)]
+pub struct Board {
+    Id: i32,
+    OwnerId: i32,
+    Name: String,
+    CurrentUsers: Vec<User>,
+}
+
+#[derive(Deserialize)]
+pub struct User {
+    Id: i32,
+    Name: i32,
 }

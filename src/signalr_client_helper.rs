@@ -1,9 +1,11 @@
 use signalrs_client::builder::{Auth, BuilderError};
+use signalrs_client::error::ClientError;
 use signalrs_client::hub::Hub;
 use signalrs_client::{self, SignalRClient};
 use std::option::Option;
 use std::{borrow::Cow, hash::Hash, sync::Arc};
 
+use crate::app::Board;
 use crate::http_client_helper::LoginInfo;
 
 pub async fn connect(login_info: Option<LoginInfo>) -> Result<SignalRClient, BuilderError> {
@@ -22,4 +24,12 @@ pub async fn connect(login_info: Option<LoginInfo>) -> Result<SignalRClient, Bui
     }
 
     builder.build().await
+}
+
+pub async fn open_whiteboard(client: &SignalRClient, id: i32) -> Result<Board, ClientError> {
+    client
+        .method("OpenWhiteboard")
+        .arg(id)?
+        .invoke::<Board>()
+        .await
 }
