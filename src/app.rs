@@ -5,11 +5,11 @@ use egui::{self, Id, Modal, Popup, widgets};
 use egui_async::{Bind, EguiAsyncPlugin, StateWithData};
 use reqwest::{Client, Error};
 use serde::{Deserialize, de};
-use signalrs_client::SignalRClient;
+use signalr_client::SignalRClient;
 
 use crate::http_client_helper;
 use crate::http_client_helper::{IdAndNameWrapper, LoginInfo};
-use crate::signalr_client_helper::{self, connect};
+use crate::signalr_client_helper::{self};
 
 pub struct WhiteboardApp {
     email_inputstring: String,
@@ -21,12 +21,13 @@ pub struct WhiteboardApp {
     new_board_is_public: bool,
     new_board_modal_open: bool,
     http_client: Client,
-    signalr_client: Bind<SignalRClient, Error>,
+    signalr_client: Bind<SignalRClient, String>,
     new_board_list: Bind<Vec<IdAndNameWrapper>, String>,
     selected_board: IdAndNameWrapper,
     new_board: Bind<IdAndNameWrapper, String>,
     board_list: Vec<IdAndNameWrapper>,
     previously_logged_in: bool,
+    opened_board: Bind<String, String>,
 }
 
 impl WhiteboardApp {
@@ -50,13 +51,26 @@ impl WhiteboardApp {
             new_board: Bind::new(true),
             board_list: Vec::new(),
             previously_logged_in: false,
+            opened_board: Bind::new(true),
         };
         temp.refresh_boards();
+        temp.connect_signalr();
         return temp;
     }
 
     fn login_changed(&mut self) {
         self.refresh_boards();
+        self.connect_signalr();
+    }
+
+    fn connect_signalr(&mut self) {
+        println!("trying to connect to signalr");
+        let mut info: Option<LoginInfo> = None;
+        if let StateWithData::Finished(login_info) = self.login.state() {
+            info = Some(login_info.clone());
+        }
+        self.signalr_client
+            .request(async move { signalr_client_helper::connect(info).await })
     }
 
     fn refresh_boards(&mut self) {
@@ -271,8 +285,21 @@ impl eframe::App for WhiteboardApp {
 
         if (self.selected_board != previous_board) {
             if (self.selected_board.id != 0) {
+                println!("board selected");
                 //handle board selection
+                if let StateWithData::Finished(sr_client) = self.signalr_client.state() {
+                    let client = sr_client.clone();
+                    let board_id = self.selected_board.id.clone();
+                    self.opened_board.request(async move {
+                        signalr_client_helper::test(client, board_id).await
+                    });
+                }
             }
+        }
+        if let StateWithData::Finished(data) = self.opened_board.state() {
+            println!("amogus");
+            println!("{}", data);
+            self.opened_board.clear();
         }
     }
 }
