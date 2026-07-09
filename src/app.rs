@@ -247,6 +247,23 @@ impl eframe::App for WhiteboardApp {
             });
         });
 
+        egui::Panel::bottom("bottom_panel").show_inside(ui, |ui| {
+            ui.horizontal(|ui| match self.signalr_client.state() {
+                StateWithData::Finished(_) => {
+                    ui.label("connected");
+                }
+                StateWithData::Pending => {
+                    ui.label("connecting");
+                }
+                StateWithData::Failed(error) => {
+                    ui.label("connection error: ".to_owned() + error);
+                }
+                StateWithData::Idle => {
+                    self.connect_signalr();
+                }
+            });
+        });
+
         if let StateWithData::Finished(info) = self.login.state() {
             if self.new_board_modal_open {
                 let modal = Modal::new(Id::new("new_board_modal")).show(ui.ctx(), |ui| {
@@ -285,15 +302,23 @@ impl eframe::App for WhiteboardApp {
 
         if (self.selected_board != previous_board) {
             if (self.selected_board.id != 0) {
-                println!("board selected");
                 //handle board selection
                 if let StateWithData::Finished(sr_client) = self.signalr_client.state() {
                     let client = sr_client.clone();
                     let board_id = self.selected_board.id.clone();
+                    println!("board {} selected", board_id);
                     self.opened_board.request(async move {
                         signalr_client_helper::test(client, board_id).await
                     });
+                } else {
+                    self.selected_board = IdAndNameWrapper {
+                        id: 0,
+                        name: "".to_owned(),
+                    }
                 }
+            }
+            if (self.selected_board.id == 0) {
+                //handle board deselection
             }
         }
         if let StateWithData::Finished(data) = self.opened_board.state() {

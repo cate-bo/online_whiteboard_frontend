@@ -5,6 +5,7 @@ edition = "2024"
 include = ["**/*.rs", "Cargo.toml"]
 
 [dependencies]
+ureq = { version = "2.0.0", features = ["tls","native-certs"] }     # to make signalr accept Unknownissuer ssl certificate
 borrow = "2.0.0"
 clone = "0.1.2"
 eframe = "0.34.3"
