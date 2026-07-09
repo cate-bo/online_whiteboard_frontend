@@ -58,7 +58,7 @@ fn main() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|cc| Ok(Box::new(Online_Whiteboard_Frontend::WhiteboardApp::new(cc)))),
+                Box::new(|cc| Ok(Box::new(online_whiteboard_frontend::WhiteboardApp::new(cc)))),
             )
             .await;
 
