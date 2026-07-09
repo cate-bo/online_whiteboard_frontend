@@ -1,4 +1,9 @@
-use std::{borrow::Cow, hash::Hash, sync::Arc};
+use std::{
+    borrow::Cow,
+    fmt::{Debug, Display},
+    hash::Hash,
+    sync::Arc,
+};
 
 use egui::Plugin;
 use egui::{self, Id, Modal, Popup, widgets};
@@ -27,7 +32,7 @@ pub struct WhiteboardApp {
     new_board: Bind<IdAndNameWrapper, String>,
     board_list: Vec<IdAndNameWrapper>,
     previously_logged_in: bool,
-    opened_board: Bind<String, String>,
+    opened_board: Bind<Board, String>,
 }
 
 impl WhiteboardApp {
@@ -308,7 +313,7 @@ impl eframe::App for WhiteboardApp {
                     let board_id = self.selected_board.id.clone();
                     println!("board {} selected", board_id);
                     self.opened_board.request(async move {
-                        signalr_client_helper::test(client, board_id).await
+                        signalr_client_helper::open_whiteboard(client, board_id).await
                     });
                 } else {
                     self.selected_board = IdAndNameWrapper {
@@ -323,7 +328,7 @@ impl eframe::App for WhiteboardApp {
         }
         if let StateWithData::Finished(data) = self.opened_board.state() {
             println!("amogus");
-            println!("{}", data);
+            println!("{}", data.Id);
             self.opened_board.clear();
         }
     }
