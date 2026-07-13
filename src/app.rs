@@ -9,7 +9,8 @@ use egui::Plugin;
 use egui::{self, Id, Modal, Popup, widgets};
 use egui_async::{Bind, EguiAsyncPlugin, StateWithData};
 use reqwest::{Client, Error};
-use serde::{Deserialize, de};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde_json::{self, Value};
 use signalr_client::SignalRClient;
 
 use crate::http_client_helper;
@@ -32,7 +33,8 @@ pub struct WhiteboardApp {
     new_board: Bind<IdAndNameWrapper, String>,
     board_list: Vec<IdAndNameWrapper>,
     previously_logged_in: bool,
-    opened_board: Bind<Board, String>,
+    opened_board: Bind<OpenWhiteboardResponse, String>,
+    test: Bind<Value, String>,
 }
 
 impl WhiteboardApp {
@@ -57,6 +59,7 @@ impl WhiteboardApp {
             board_list: Vec::new(),
             previously_logged_in: false,
             opened_board: Bind::new(true),
+            test: Bind::new(true),
         };
         temp.refresh_boards();
         temp.connect_signalr();
@@ -249,6 +252,15 @@ impl eframe::App for WhiteboardApp {
                             .show(|ui| self.login_or_register_menu(ui));
                     }
                 }
+                ui.menu_button("tests", |ui| {
+                    if ui.button("test1").clicked() {
+                        if let StateWithData::Finished(client) = self.signalr_client.state() {
+                            let c = client.clone();
+                            self.test
+                                .request(async move { signalr_client_helper::test(c).await })
+                        }
+                    }
+                });
             });
         });
 
@@ -328,22 +340,63 @@ impl eframe::App for WhiteboardApp {
         }
         if let StateWithData::Finished(data) = self.opened_board.state() {
             println!("amogus");
-            println!("{}", data.Id);
+            let temp = serde_json::json!(data);
+            println!("{}", temp);
             self.opened_board.clear();
+        }
+
+        if let StateWithData::Failed(error) = self.opened_board.state() {
+            //println!("{error}");
+            self.opened_board.clear();
+        }
+
+        if let StateWithData::Finished(result) = self.test.state() {
+            //println!("test2: {}", serde_json::to_string_pretty(result).unwrap());
+            println!("amogus: {:?}", result);
+            println!();
+            //let thing: Board = serde_json::from_str(result).unwrap();
+            let thing: OpenWhiteboardResponse = serde_json::from_value(result.clone()).unwrap();
+            println!("amogus: {:?}", thing);
+            self.test.clear();
         }
     }
 }
 
-#[derive(Deserialize)]
-pub struct Board {
-    Id: i32,
-    OwnerId: i32,
-    Name: String,
-    CurrentUsers: Vec<User>,
+#[derive(Deserialize, Serialize, Debug)]
+pub struct OpenWhiteboardResponse {
+    id: i32,
+    ownerId: i32,
+    name: String,
+    drawing: Vec<u8>,
+    currentEditors: Vec<User>,
+    texts: Vec<Text>,
+    images: Vec<Image>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct User {
     Id: i32,
     Name: i32,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct Text {
+    Id: i32,
+    X: i32,
+    Y: i32,
+    Text: String,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+pub struct Image {
+    Id: i32,
+    X: i32,
+    Y: i32,
+    File: String,
+}
+
+
+
+struct Whiteboard{
+    
 }
