@@ -1,13 +1,18 @@
+use futures::future::MaybeDone;
 use std::{
     borrow::Cow,
     fmt::{Debug, Display},
     hash::Hash,
-    sync::Arc,
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, Sender},
+    },
 };
 
-use egui::Plugin;
 use egui::{self, Id, Modal, Popup, widgets};
-use egui_async::{Bind, EguiAsyncPlugin, StateWithData};
+use egui::{Label, Plugin};
+use egui_async::{Bind, EguiAsyncPlugin, StateWithData, bind::MaybeSend};
+use egui_flex::{Flex, item};
 use reqwest::{Client, Error};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{self, Value};
@@ -35,10 +40,15 @@ pub struct WhiteboardApp {
     previously_logged_in: bool,
     opened_board: Bind<OpenWhiteboardResponse, String>,
     test: Bind<Value, String>,
+    current_whiteboard: Option<Whiteboard>,
+    loading_board: MaybeDone<impl Future<Output = Whiteboard>>,
+    reciever: Receiver<Update>,
+    sender: Sender<Update>,
 }
 
 impl WhiteboardApp {
     pub fn new(c: &eframe::CreationContext<'_>) -> Self {
+        let (send, recv) = mpsc::channel::<Update>();
         let mut temp = Self {
             email_inputstring: "test4@test4.test4".to_owned(),
             username_inputstring: "".to_owned(),
@@ -60,6 +70,10 @@ impl WhiteboardApp {
             previously_logged_in: false,
             opened_board: Bind::new(true),
             test: Bind::new(true),
+            current_whiteboard: None,
+            loading_board: false,
+            reciever: recv,
+            sender: send,
         };
         temp.refresh_boards();
         temp.connect_signalr();
@@ -77,8 +91,9 @@ impl WhiteboardApp {
         if let StateWithData::Finished(login_info) = self.login.state() {
             info = Some(login_info.clone());
         }
+        let sender = self.sender.clone();
         self.signalr_client
-            .request(async move { signalr_client_helper::connect(info).await })
+            .request(async move { signalr_client_helper::connect(info, sender).await })
     }
 
     fn refresh_boards(&mut self) {
@@ -195,6 +210,18 @@ impl eframe::App for WhiteboardApp {
             self.login_changed();
             self.previously_logged_in = currently_logged_in;
         }
+        if !self.loading_board {
+            for update in self.reciever.try_iter() {
+                match update {
+                    Update::Boardupdate(boardupdate) => {}
+                    Update::Boardrecieved(boardresponse) => {
+                        break;
+                    }
+                }
+            }
+        }
+
+        ctx.request_repaint();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -281,6 +308,20 @@ impl eframe::App for WhiteboardApp {
             });
         });
 
+        if let Some(whiteboard) = &self.current_whiteboard {
+        } else if self.selected_board.id != 0
+            && let None = self.current_whiteboard
+        {
+            Flex::new().h_full().w_full().show(ui, |flex| {
+                flex.add(item().grow(1_f32), Label::new("loading"));
+                flex.add(item(), egui::Spinner::new());
+            });
+        } else {
+            Flex::new().h_full().w_full().show(ui, |flex| {
+                flex.add(item().grow(1_f32), Label::new("no board selected"));
+            });
+        }
+
         if let StateWithData::Finished(info) = self.login.state() {
             if self.new_board_modal_open {
                 let modal = Modal::new(Id::new("new_board_modal")).show(ui.ctx(), |ui| {
@@ -318,6 +359,7 @@ impl eframe::App for WhiteboardApp {
         }
 
         if (self.selected_board != previous_board) {
+            self.current_whiteboard = None;
             if (self.selected_board.id != 0) {
                 //handle board selection
                 if let StateWithData::Finished(sr_client) = self.signalr_client.state() {
@@ -333,8 +375,7 @@ impl eframe::App for WhiteboardApp {
                         name: "".to_owned(),
                     }
                 }
-            }
-            if (self.selected_board.id == 0) {
+            } else {
                 //handle board deselection
             }
         }
@@ -395,8 +436,23 @@ pub struct Image {
     File: String,
 }
 
+pub struct Whiteboard {
+    //drawing: Image,
+}
 
+pub enum Update {
+    Boardrecieved(OpenWhiteboardResponse),
+    Boardupdate(BoardUpdate),
+}
 
-struct Whiteboard{
-    
+pub struct BoardUpdate {}
+
+pub fn spawn<F>(future: F)
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    #[cfg(not(target_arch = "wasm32"))]
+    tokio::task::spawn(future);
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_futures::spawn_local(future);
 }

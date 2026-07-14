@@ -16,20 +16,14 @@ fn main() -> eframe::Result {
 
     let _enter = rt.enter();
 
-    std::thread::spawn(move || {
-        rt.block_on(async {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
-            }
-        });
-    });
-
-    let native_options = eframe::NativeOptions::default();
-    eframe::run_native(
-        "Whiteboard",
-        native_options,
-        Box::new(|cc| Ok(Box::new(online_whiteboard_frontend::WhiteboardApp::new(cc)))),
-    )
+    rt.block_on(async {
+        let native_options = eframe::NativeOptions::default();
+        eframe::run_native(
+            "Whiteboard",
+            native_options,
+            Box::new(|cc| Ok(Box::new(online_whiteboard_frontend::WhiteboardApp::new(cc)))),
+        )
+    })
 }
 
 // When compiling to web using trunk:

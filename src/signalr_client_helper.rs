@@ -1,14 +1,18 @@
 use serde_json::Value;
 use signalr_client::{self, SignalRClient};
 use std::option::Option;
-use std::{borrow::Cow, hash::Hash, sync::Arc};
+use std::{borrow::Cow, hash::Hash, sync::Arc, sync::mpsc::Sender};
 
 use crate::app::OpenWhiteboardResponse;
+use crate::app::{Update, Whiteboard};
 use crate::http_client_helper::LoginInfo;
 
-pub async fn connect(login_info: Option<LoginInfo>) -> Result<SignalRClient, String> {
+pub async fn connect(
+    login_info: Option<LoginInfo>,
+    mpsc_sender: Sender<Update>,
+) -> Result<SignalRClient, String> {
     println!("attempting connection");
-    SignalRClient::connect_with("localhost", "socket", |cc| {
+    let client = SignalRClient::connect_with("localhost", "socket", |cc| {
         cc.with_port(7081);
         cc.secure();
         //cc.with_messagepack_protocol();
@@ -16,7 +20,9 @@ pub async fn connect(login_info: Option<LoginInfo>) -> Result<SignalRClient, Str
             cc.authenticate_bearer(info.accessToken);
         }
     })
-    .await
+    .await?;
+    //register callbacks here
+    return Ok(client);
 }
 
 pub async fn open_whiteboard(
@@ -31,6 +37,7 @@ pub async fn open_whiteboard(
 }
 
 pub async fn test(mut client: SignalRClient) -> Result<Value, String> {
+    let thing = async { Whiteboard {} };
     client
         .invoke_with_args("OpenWhiteboard".to_owned(), |c| {
             c.argument(1);
