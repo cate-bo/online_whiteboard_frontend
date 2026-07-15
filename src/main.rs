@@ -9,21 +9,25 @@
 fn main() -> eframe::Result {
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("Unable to create Runtime");
+    let rt = tokio::runtime::Runtime::new().expect("Unable to create Runtime");
 
     let _enter = rt.enter();
 
-    rt.block_on(async {
-        let native_options = eframe::NativeOptions::default();
-        eframe::run_native(
-            "Whiteboard",
-            native_options,
-            Box::new(|cc| Ok(Box::new(online_whiteboard_frontend::WhiteboardApp::new(cc)))),
-        )
-    })
+    std::thread::spawn(move || {
+        rt.block_on(async {
+            //tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+            }
+        });
+    });
+
+    let native_options = eframe::NativeOptions::default();
+    eframe::run_native(
+        "Whiteboard",
+        native_options,
+        Box::new(|cc| Ok(Box::new(online_whiteboard_frontend::WhiteboardApp::new(cc)))),
+    )
 }
 
 // When compiling to web using trunk:

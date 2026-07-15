@@ -25,19 +25,17 @@ pub async fn connect(
     return Ok(client);
 }
 
-pub async fn open_whiteboard(
-    mut client: SignalRClient,
-    id: i32,
-) -> Result<OpenWhiteboardResponse, String> {
-    client
+pub async fn open_whiteboard(mut client: SignalRClient, id: i32, sender: Sender<Update>) {
+    let res = client
         .invoke_with_args("OpenWhiteboard".to_owned(), |c| {
             c.argument(id);
         })
         .await
+        .unwrap();
+    sender.send(Update::Boardrecieved(res));
 }
 
 pub async fn test(mut client: SignalRClient) -> Result<Value, String> {
-    let thing = async { Whiteboard {} };
     client
         .invoke_with_args("OpenWhiteboard".to_owned(), |c| {
             c.argument(1);

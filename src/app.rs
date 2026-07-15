@@ -1,6 +1,21 @@
+use base64::Engine;
+use base64::prelude::BASE64_STANDARD;
+use egui::Color32;
+use egui::{
+    self, ColorImage, Context, Id, Modal, Popup, TextureHandle, epaint::TextureManager, widgets,
+};
+use egui::{Label, Plugin, mutex::RwLock};
+use egui_async::{Bind, EguiAsyncPlugin, StateWithData, bind::MaybeSend};
+use egui_flex::{Flex, item};
 use futures::future::MaybeDone;
+use image;
+use reqwest::{Client, Error};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde_json::{self, Value};
+use signalr_client::SignalRClient;
 use std::{
     borrow::Cow,
+    collections::VecDeque,
     fmt::{Debug, Display},
     hash::Hash,
     sync::{
@@ -8,15 +23,6 @@ use std::{
         mpsc::{self, Receiver, Sender},
     },
 };
-
-use egui::{self, Id, Modal, Popup, widgets};
-use egui::{Label, Plugin};
-use egui_async::{Bind, EguiAsyncPlugin, StateWithData, bind::MaybeSend};
-use egui_flex::{Flex, item};
-use reqwest::{Client, Error};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use serde_json::{self, Value};
-use signalr_client::SignalRClient;
 
 use crate::http_client_helper;
 use crate::http_client_helper::{IdAndNameWrapper, LoginInfo};
@@ -38,12 +44,11 @@ pub struct WhiteboardApp {
     new_board: Bind<IdAndNameWrapper, String>,
     board_list: Vec<IdAndNameWrapper>,
     previously_logged_in: bool,
-    opened_board: Bind<OpenWhiteboardResponse, String>,
     test: Bind<Value, String>,
     current_whiteboard: Option<Whiteboard>,
-    loading_board: MaybeDone<impl Future<Output = Whiteboard>>,
     reciever: Receiver<Update>,
     sender: Sender<Update>,
+    board_update_queue: VecDeque<BoardUpdate>,
 }
 
 impl WhiteboardApp {
@@ -68,12 +73,11 @@ impl WhiteboardApp {
             new_board: Bind::new(true),
             board_list: Vec::new(),
             previously_logged_in: false,
-            opened_board: Bind::new(true),
             test: Bind::new(true),
             current_whiteboard: None,
-            loading_board: false,
             reciever: recv,
             sender: send,
+            board_update_queue: VecDeque::new(),
         };
         temp.refresh_boards();
         temp.connect_signalr();
@@ -197,6 +201,52 @@ impl WhiteboardApp {
             }
         });
     }
+
+    fn load_whiteboard(data: OpenWhiteboardResponse, context: Context, sender: Sender<Update>) {
+        let image =
+            image::load_from_memory(&(BASE64_STANDARD.decode(&data.drawing).unwrap())).unwrap();
+        let size = [image.width() as _, image.height() as _];
+        let image_buffer = image.to_rgba8();
+        let pixels = image_buffer.as_flat_samples();
+        let drawing = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+        let mut images: Vec<Image> = Vec::new();
+        for image_wrapper in data.images {
+            let image = image::load_from_memory_with_format(
+                &image_wrapper.File.as_bytes(),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+            let size = [image.width() as _, image.height() as _];
+            let image_buffer = image.to_rgba8();
+            let pixels = image_buffer.as_flat_samples();
+            let image = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+            images.push(Image {
+                id: image_wrapper.Id,
+                x: image_wrapper.X,
+                y: image_wrapper.Y,
+                file: context.load_texture(
+                    format!("image_{}", image_wrapper.Id),
+                    image,
+                    Default::default(),
+                ),
+            });
+        }
+        let board = Whiteboard {
+            id: data.id,
+            ownerId: data.ownerId,
+            name: data.name,
+            drawing: context.load_texture("drawing", drawing, Default::default()),
+            currentEditors: data.currentEditors,
+            texts: data.texts,
+            images: images,
+        };
+        println!("amogus");
+        sender.send(Update::Boardloaded(board));
+    }
+
+    fn apply_board_update(&mut self, update: BoardUpdate) {
+        //TODO
+    }
 }
 
 impl eframe::App for WhiteboardApp {
@@ -210,15 +260,27 @@ impl eframe::App for WhiteboardApp {
             self.login_changed();
             self.previously_logged_in = currently_logged_in;
         }
-        if !self.loading_board {
-            for update in self.reciever.try_iter() {
-                match update {
-                    Update::Boardupdate(boardupdate) => {}
-                    Update::Boardrecieved(boardresponse) => {
-                        break;
-                    }
+        for update in self.reciever.try_iter() {
+            match update {
+                Update::Boardupdate(boardupdate) => {
+                    self.board_update_queue.push_back(boardupdate);
+                }
+                Update::Boardrecieved(boardresponse) => {
+                    self.board_update_queue.clear();
+                    let sender = self.sender.clone();
+                    let context = ctx.clone();
+                    spawn(async move {
+                        WhiteboardApp::load_whiteboard(boardresponse, context, sender);
+                    });
+                }
+                Update::Boardloaded(board) => {
+                    self.current_whiteboard = Some(board);
                 }
             }
+        }
+
+        if let Some(Whiteboard) = &mut self.current_whiteboard {
+            while let Some(BoardUpdate) = self.board_update_queue.pop_front() {}
         }
 
         ctx.request_repaint();
@@ -309,6 +371,13 @@ impl eframe::App for WhiteboardApp {
         });
 
         if let Some(whiteboard) = &self.current_whiteboard {
+            egui::Frame::new().fill(Color32::GREEN).show(ui, |ui| {});
+            let size = whiteboard.drawing.size_vec2();
+            let sized_texture = egui::load::SizedTexture::new(whiteboard.drawing.id(), size);
+            ui.add(egui::Image::new(sized_texture).fit_to_exact_size(size));
+            Flex::vertical().h_full().w_full().show(ui, |flex| {
+                flex.add_ui(item(), |ui| {});
+            });
         } else if self.selected_board.id != 0
             && let None = self.current_whiteboard
         {
@@ -365,9 +434,10 @@ impl eframe::App for WhiteboardApp {
                 if let StateWithData::Finished(sr_client) = self.signalr_client.state() {
                     let client = sr_client.clone();
                     let board_id = self.selected_board.id.clone();
+                    let sender = self.sender.clone();
                     println!("board {} selected", board_id);
-                    self.opened_board.request(async move {
-                        signalr_client_helper::open_whiteboard(client, board_id).await
+                    spawn(async move {
+                        signalr_client_helper::open_whiteboard(client, board_id, sender).await
                     });
                 } else {
                     self.selected_board = IdAndNameWrapper {
@@ -378,17 +448,6 @@ impl eframe::App for WhiteboardApp {
             } else {
                 //handle board deselection
             }
-        }
-        if let StateWithData::Finished(data) = self.opened_board.state() {
-            println!("amogus");
-            let temp = serde_json::json!(data);
-            println!("{}", temp);
-            self.opened_board.clear();
-        }
-
-        if let StateWithData::Failed(error) = self.opened_board.state() {
-            //println!("{error}");
-            self.opened_board.clear();
         }
 
         if let StateWithData::Finished(result) = self.test.state() {
@@ -408,10 +467,10 @@ pub struct OpenWhiteboardResponse {
     id: i32,
     ownerId: i32,
     name: String,
-    drawing: Vec<u8>,
+    drawing: String,
     currentEditors: Vec<User>,
     texts: Vec<Text>,
-    images: Vec<Image>,
+    images: Vec<ImageWrapper>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -429,7 +488,7 @@ pub struct Text {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-pub struct Image {
+pub struct ImageWrapper {
     Id: i32,
     X: i32,
     Y: i32,
@@ -437,15 +496,42 @@ pub struct Image {
 }
 
 pub struct Whiteboard {
-    //drawing: Image,
+    id: i32,
+    ownerId: i32,
+    name: String,
+    drawing: TextureHandle,
+    currentEditors: Vec<User>,
+    texts: Vec<Text>,
+    images: Vec<Image>,
+}
+
+struct WhiteboardImageData {
+    drawing: ColorImage,
+    images: Vec<(i32, ColorImage)>,
+}
+
+pub struct Image {
+    id: i32,
+    x: i32,
+    y: i32,
+    file: TextureHandle,
 }
 
 pub enum Update {
     Boardrecieved(OpenWhiteboardResponse),
+    Boardloaded(Whiteboard),
     Boardupdate(BoardUpdate),
 }
 
-pub struct BoardUpdate {}
+pub struct BoardUpdate {
+    //TODO
+}
+
+enum BoardPermission {
+    Owner,
+    Editor,
+    Viewer,
+}
 
 pub fn spawn<F>(future: F)
 where
