@@ -1,10 +1,13 @@
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
-use egui::Color32;
+use eframe::wgpu::CompilationMessageType::Info;
+use egui::emath::TSTransform;
 use egui::{
     self, ColorImage, Context, Id, Modal, Popup, TextureHandle, epaint::TextureManager, widgets,
 };
+use egui::{Color32, DragPanButtons, Rect, Response, menu};
 use egui::{Label, Plugin, mutex::RwLock};
+use egui_async::StateWithData::Finished;
 use egui_async::{Bind, EguiAsyncPlugin, StateWithData, bind::MaybeSend};
 use egui_flex::{Flex, item};
 use futures::future::MaybeDone;
@@ -49,6 +52,8 @@ pub struct WhiteboardApp {
     reciever: Receiver<Update>,
     sender: Sender<Update>,
     board_update_queue: VecDeque<BoardUpdate>,
+    selected_tool: Tool,
+    scene_rect: Rect,
 }
 
 impl WhiteboardApp {
@@ -78,6 +83,8 @@ impl WhiteboardApp {
             reciever: recv,
             sender: send,
             board_update_queue: VecDeque::new(),
+            selected_tool: Tool::Navigate,
+            scene_rect: Rect::ZERO,
         };
         temp.refresh_boards();
         temp.connect_signalr();
@@ -202,7 +209,12 @@ impl WhiteboardApp {
         });
     }
 
-    fn load_whiteboard(data: OpenWhiteboardResponse, context: Context, sender: Sender<Update>) {
+    fn load_whiteboard(
+        data: OpenWhiteboardResponse,
+        context: Context,
+        login: Option<LoginInfo>,
+        sender: Sender<Update>,
+    ) {
         let image =
             image::load_from_memory(&(BASE64_STANDARD.decode(&data.drawing).unwrap())).unwrap();
         let size = [image.width() as _, image.height() as _];
@@ -231,6 +243,20 @@ impl WhiteboardApp {
                 ),
             });
         }
+        let mut permission = BoardPermission::Viewer;
+        if let Some(login_info) = login {
+            if (login_info.id == data.ownerId) {
+                permission = BoardPermission::Owner;
+            } else {
+                for user in &data.currentEditors {
+                    if (login_info.id == user.Id) {
+                        permission = BoardPermission::Editor;
+                        break;
+                    }
+                }
+            }
+        }
+
         let board = Whiteboard {
             id: data.id,
             ownerId: data.ownerId,
@@ -269,8 +295,12 @@ impl eframe::App for WhiteboardApp {
                     self.board_update_queue.clear();
                     let sender = self.sender.clone();
                     let context = ctx.clone();
+                    let mut login: Option<LoginInfo> = None;
+                    if let StateWithData::Finished(info) = self.login.state() {
+                        login = Some(info.clone());
+                    }
                     spawn(async move {
-                        WhiteboardApp::load_whiteboard(boardresponse, context, sender);
+                        WhiteboardApp::load_whiteboard(boardresponse, context, login, sender);
                     });
                 }
                 Update::Boardloaded(board) => {
@@ -370,26 +400,65 @@ impl eframe::App for WhiteboardApp {
             });
         });
 
-        if let Some(whiteboard) = &self.current_whiteboard {
-            egui::Frame::new().fill(Color32::GREEN).show(ui, |ui| {});
-            let size = whiteboard.drawing.size_vec2();
-            let sized_texture = egui::load::SizedTexture::new(whiteboard.drawing.id(), size);
-            ui.add(egui::Image::new(sized_texture).fit_to_exact_size(size));
-            Flex::vertical().h_full().w_full().show(ui, |flex| {
-                flex.add_ui(item(), |ui| {});
-            });
-        } else if self.selected_board.id != 0
-            && let None = self.current_whiteboard
-        {
-            Flex::new().h_full().w_full().show(ui, |flex| {
-                flex.add(item().grow(1_f32), Label::new("loading"));
-                flex.add(item(), egui::Spinner::new());
-            });
-        } else {
-            Flex::new().h_full().w_full().show(ui, |flex| {
-                flex.add(item().grow(1_f32), Label::new("no board selected"));
-            });
-        }
+        egui::CentralPanel::default().show(ui, |ui| {
+            if let Some(whiteboard) = &self.current_whiteboard {
+                egui::Panel::top("board_menu").show(ui, |ui| {
+                    menu::MenuBar::new().ui(ui, |ui| {});
+                });
+
+                egui::CentralPanel::default()
+                    // .frame(egui::Frame::new().fill(Color32::WHITE))
+                    .show(ui, |ui| {
+                        let scene =
+                            egui::ScrollArea::both()..drag_pan_buttons(DragPanButtons::MIDDLE);
+                        if self.scene_rect.top() < 0_f32 {
+                            self.scene_rect.set_top(0_f32);
+                        }
+                        let mut response = scene
+                            .show(ui, &mut self.scene_rect, |ui| {
+                                egui::Frame::NONE.fill(Color32::WHITE).show(ui, |ui| {
+                                    let size = whiteboard.drawing.size_vec2();
+                                    let sized_texture = egui::load::SizedTexture::new(
+                                        whiteboard.drawing.id(),
+                                        size,
+                                    );
+                                    ui.add(egui::Image::new(sized_texture).fit_to_exact_size(size));
+                                });
+                            })
+                            .response;
+                        // let mut thing = TSTransform::default();
+                        // scene.register_pan_and_zoom(ui, &mut response, &mut thing);
+                        // response.
+                        // println!("{:?}", response);
+                        // println!("{:?}", thing);
+                        // if self.scene_rect.top() < 0_f32 {
+                        //     self.scene_rect.set_top(0_f32);
+                        // }
+                        // let size = whiteboard.drawing.size_vec2();
+                        // let sized_texture =
+                        //     egui::load::SizedTexture::new(whiteboard.drawing.id(), size);
+                        // ui.add(egui::Image::new(sized_texture).fit_to_exact_size(size));
+                    });
+                // egui::Frame::new().fill(Color32::GREEN).show(ui, |ui| {});
+                // let size = whiteboard.drawing.size_vec2();
+                // let sized_texture = egui::load::SizedTexture::new(whiteboard.drawing.id(), size);
+                // ui.add(egui::Image::new(sized_texture).fit_to_exact_size(size));
+                // Flex::vertical().h_full().w_full().show(ui, |flex| {
+                //     flex.add_ui(item(), |ui| {});
+                // });
+            } else if self.selected_board.id != 0
+                && let None = self.current_whiteboard
+            {
+                Flex::new().h_full().w_full().show(ui, |flex| {
+                    flex.add(item().grow(1_f32), Label::new("loading"));
+                    flex.add(item(), egui::Spinner::new());
+                });
+            } else {
+                Flex::new().h_full().w_full().show(ui, |flex| {
+                    flex.add(item().grow(1_f32), Label::new("no board selected"));
+                });
+            }
+        });
 
         if let StateWithData::Finished(info) = self.login.state() {
             if self.new_board_modal_open {
@@ -505,11 +574,6 @@ pub struct Whiteboard {
     images: Vec<Image>,
 }
 
-struct WhiteboardImageData {
-    drawing: ColorImage,
-    images: Vec<(i32, ColorImage)>,
-}
-
 pub struct Image {
     id: i32,
     x: i32,
@@ -525,6 +589,11 @@ pub enum Update {
 
 pub struct BoardUpdate {
     //TODO
+}
+
+enum Tool {
+    Brush,
+    Navigate,
 }
 
 enum BoardPermission {

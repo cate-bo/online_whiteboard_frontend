@@ -58,6 +58,17 @@ pub async fn parse_token_response(response: Response) -> Option<LoginInfo> {
         .to_str()
         .unwrap()
         .to_owned();
+    login_info.id = response
+        .headers()
+        .iter()
+        .find(|header| header.0.eq("id"))
+        .unwrap()
+        .1
+        .to_str()
+        .unwrap()
+        .to_owned()
+        .parse::<i32>()
+        .unwrap();
     let thing: String = response.text().await.unwrap().clone();
     let response_body: Value = serde_json::from_str(&thing).unwrap();
     login_info.accessToken = response_body
@@ -206,6 +217,7 @@ pub async fn get_board_list(
 #[derive(Clone, Default, Debug)]
 pub struct LoginInfo {
     pub userName: String,
+    pub id: i32,
     pub accessToken: String,
     expiresIn: i64,
     refreshToken: String,
