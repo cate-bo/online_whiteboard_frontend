@@ -2,10 +2,11 @@ use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use eframe::wgpu::CompilationMessageType::Info;
 use egui::emath::TSTransform;
+use egui::scroll_area::ScrollSource;
 use egui::{
     self, ColorImage, Context, Id, Modal, Popup, TextureHandle, epaint::TextureManager, widgets,
 };
-use egui::{Color32, DragPanButtons, Rect, Response, menu};
+use egui::{Color32, DragPanButtons, Pos2, Rect, Response, Sense, menu};
 use egui::{Label, Plugin, mutex::RwLock};
 use egui_async::StateWithData::Finished;
 use egui_async::{Bind, EguiAsyncPlugin, StateWithData, bind::MaybeSend};
@@ -54,6 +55,8 @@ pub struct WhiteboardApp {
     board_update_queue: VecDeque<BoardUpdate>,
     selected_tool: Tool,
     scene_rect: Rect,
+    current_color: Color32,
+    brush_size: i32,
 }
 
 impl WhiteboardApp {
@@ -84,7 +87,9 @@ impl WhiteboardApp {
             sender: send,
             board_update_queue: VecDeque::new(),
             selected_tool: Tool::Navigate,
-            scene_rect: Rect::ZERO,
+            scene_rect: Rect::from_pos(Pos2::new(0_f32, 0_f32)),
+            current_color: Color32::BLACK,
+            brush_size: 5,
         };
         temp.refresh_boards();
         temp.connect_signalr();
@@ -94,15 +99,25 @@ impl WhiteboardApp {
     fn login_changed(&mut self) {
         self.refresh_boards();
         self.connect_signalr();
+
+        self.selected_board = IdAndNameWrapper {
+            id: 0,
+            name: "".to_owned(),
+        };
+        self.current_whiteboard = None;
     }
 
     fn connect_signalr(&mut self) {
+        if let StateWithData::Finished(client) = self.signalr_client.state() {
+            client.clone().disconnect();
+        }
         println!("trying to connect to signalr");
         let mut info: Option<LoginInfo> = None;
         if let StateWithData::Finished(login_info) = self.login.state() {
             info = Some(login_info.clone());
         }
         let sender = self.sender.clone();
+        self.signalr_client.clear();
         self.signalr_client
             .request(async move { signalr_client_helper::connect(info, sender).await })
     }
@@ -261,10 +276,12 @@ impl WhiteboardApp {
             id: data.id,
             ownerId: data.ownerId,
             name: data.name,
-            drawing: context.load_texture("drawing", drawing, Default::default()),
+            drawing_texture: context.load_texture("drawing", drawing.clone(), Default::default()),
+            drawing_Image: drawing,
             currentEditors: data.currentEditors,
             texts: data.texts,
             images: images,
+            permission: permission,
         };
         println!("amogus");
         sender.send(Update::Boardloaded(board));
@@ -284,8 +301,8 @@ impl eframe::App for WhiteboardApp {
         }
         if (self.previously_logged_in ^ currently_logged_in) {
             self.login_changed();
-            self.previously_logged_in = currently_logged_in;
         }
+        self.previously_logged_in = currently_logged_in;
         for update in self.reciever.try_iter() {
             match update {
                 Update::Boardupdate(boardupdate) => {
@@ -305,6 +322,13 @@ impl eframe::App for WhiteboardApp {
                 }
                 Update::Boardloaded(board) => {
                     self.current_whiteboard = Some(board);
+                }
+                Update::BoardError => {
+                    self.selected_board = IdAndNameWrapper {
+                        id: 0,
+                        name: "".to_owned(),
+                    };
+                    self.current_whiteboard = None;
                 }
             }
         }
@@ -403,29 +427,73 @@ impl eframe::App for WhiteboardApp {
         egui::CentralPanel::default().show(ui, |ui| {
             if let Some(whiteboard) = &self.current_whiteboard {
                 egui::Panel::top("board_menu").show(ui, |ui| {
-                    menu::MenuBar::new().ui(ui, |ui| {});
+                    if let BoardPermission::Viewer = whiteboard.permission {
+                    } else {
+                        menu::MenuBar::new().ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.selected_tool,
+                                Tool::Navigate,
+                                "navigate",
+                            );
+                            ui.selectable_value(&mut self.selected_tool, Tool::Brush, "brush");
+                            ui.color_edit_button_srgba(&mut self.current_color);
+                            ui.add(egui::DragValue::new(&mut self.brush_size).range(1..=50));
+                        });
+                    }
                 });
 
                 egui::CentralPanel::default()
                     // .frame(egui::Frame::new().fill(Color32::WHITE))
                     .show(ui, |ui| {
-                        let scene =
-                            egui::ScrollArea::both()..drag_pan_buttons(DragPanButtons::MIDDLE);
-                        if self.scene_rect.top() < 0_f32 {
-                            self.scene_rect.set_top(0_f32);
+                        let mut scene = egui::Scene::new().drag_pan_buttons(DragPanButtons::MIDDLE);
+                        if let Tool::Navigate = self.selected_tool {
+                            scene = scene.drag_pan_buttons(DragPanButtons::all());
                         }
                         let mut response = scene
                             .show(ui, &mut self.scene_rect, |ui| {
-                                egui::Frame::NONE.fill(Color32::WHITE).show(ui, |ui| {
-                                    let size = whiteboard.drawing.size_vec2();
-                                    let sized_texture = egui::load::SizedTexture::new(
-                                        whiteboard.drawing.id(),
-                                        size,
-                                    );
-                                    ui.add(egui::Image::new(sized_texture).fit_to_exact_size(size));
-                                });
+                                egui::Frame::NONE
+                                    .fill(Color32::WHITE)
+                                    .show(ui, |ui| {
+                                        let size = whiteboard.drawing_texture.size_vec2();
+                                        let sized_texture = egui::load::SizedTexture::new(
+                                            whiteboard.drawing_texture.id(),
+                                            size,
+                                        );
+                                        let mut drawing =
+                                            egui::Image::new(sized_texture).fit_to_exact_size(size);
+                                        if let Tool::Navigate = self.selected_tool {
+                                            drawing = drawing.sense(Sense::empty());
+                                        } else {
+                                            drawing = drawing.sense(Sense::drag());
+                                        }
+                                        let res = ui.add(drawing);
+                                        match self.selected_tool {
+                                            Tool::Navigate => {
+                                                res.on_hover_cursor(egui::CursorIcon::AllScroll);
+                                            }
+                                            Tool::Brush => {
+                                                res.on_hover_cursor(egui::CursorIcon::Default);
+                                            }
+                                            _ => {}
+                                        }
+                                    })
+                                    .response;
                             })
                             .response;
+                        response.on_hover_and_drag_cursor(egui::CursorIcon::AllScroll);
+                        // if self.scene_rect.top() < 0_f32 {
+                        //     self.scene_rect.set_top(0_f32);
+                        // }
+                        // if self.scene_rect.bottom() > 5000_f32 {
+                        //     self.scene_rect.set_bottom(5000_f32);
+                        // }
+                        // if self.scene_rect.left() < 0_f32 {
+                        //     self.scene_rect.set_left(0_f32);
+                        // }
+                        // if self.scene_rect.right() > 5000_f32 {
+                        //     self.scene_rect.set_right(5000_f32);
+                        // }
+
                         // let mut thing = TSTransform::default();
                         // scene.register_pan_and_zoom(ui, &mut response, &mut thing);
                         // response.
@@ -439,6 +507,7 @@ impl eframe::App for WhiteboardApp {
                         //     egui::load::SizedTexture::new(whiteboard.drawing.id(), size);
                         // ui.add(egui::Image::new(sized_texture).fit_to_exact_size(size));
                     });
+
                 // egui::Frame::new().fill(Color32::GREEN).show(ui, |ui| {});
                 // let size = whiteboard.drawing.size_vec2();
                 // let sized_texture = egui::load::SizedTexture::new(whiteboard.drawing.id(), size);
@@ -568,10 +637,12 @@ pub struct Whiteboard {
     id: i32,
     ownerId: i32,
     name: String,
-    drawing: TextureHandle,
+    drawing_texture: TextureHandle,
+    drawing_Image: ColorImage,
     currentEditors: Vec<User>,
     texts: Vec<Text>,
     images: Vec<Image>,
+    permission: BoardPermission,
 }
 
 pub struct Image {
@@ -583,6 +654,7 @@ pub struct Image {
 
 pub enum Update {
     Boardrecieved(OpenWhiteboardResponse),
+    BoardError,
     Boardloaded(Whiteboard),
     Boardupdate(BoardUpdate),
 }
@@ -591,6 +663,7 @@ pub struct BoardUpdate {
     //TODO
 }
 
+#[derive(PartialEq)]
 enum Tool {
     Brush,
     Navigate,
