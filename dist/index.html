@@ -15,8 +15,8 @@
         <!-- config for our rust wasm binary. go to https://trunkrs.dev/assets/#rust for more customization -->
         
 <script type="module">
-import init, * as bindings from '/online_whiteboard_frontend-2194719ce293dfed.js';
-const wasm = await init({ module_or_path: '/online_whiteboard_frontend-2194719ce293dfed_bg.wasm' });
+import init, * as bindings from '/online_whiteboard_frontend-8f66d0f0dee4df10.js';
+const wasm = await init({ module_or_path: '/online_whiteboard_frontend-8f66d0f0dee4df10_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -152,7 +152,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
                 }
             }
         </style>
-    <link rel="modulepreload" href="/online_whiteboard_frontend-2194719ce293dfed.js" crossorigin="anonymous" integrity="sha384-W35PiZyF/yTA90vEsmPG7YDuxjXSULqSFfsi2tuP/3Kx9bgm5gBejHirJvnhE5Ro"><link rel="preload" href="/online_whiteboard_frontend-2194719ce293dfed_bg.wasm" crossorigin="anonymous" integrity="sha384-7gr+oStjrH+c4yEplfO8JRlB2gJUY0ZkwtnmzNg1iM1Ui0vIcCQnTFbSJub9Tktf" as="fetch" type="application/wasm"></head>
+    <link rel="modulepreload" href="/online_whiteboard_frontend-8f66d0f0dee4df10.js" crossorigin="anonymous" integrity="sha384-PjeP1KARvInkWbXOQF2PKIh11YlnhCNmwe8yHXbwwpBiDqtv9oUb1LAjdNBef5xS"><link rel="preload" href="/online_whiteboard_frontend-8f66d0f0dee4df10_bg.wasm" crossorigin="anonymous" integrity="sha384-m/D5twIor5lHaErXYlDP752oyKBdN8tC/dWus/AQjJJLBx4XhchLW5HI3bRwbRZ0" as="fetch" type="application/wasm"></head>
 
     <body>
         <!-- The WASM code will resize the canvas dynamically -->

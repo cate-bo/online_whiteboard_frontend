@@ -12,7 +12,8 @@ use egui_async::StateWithData::Finished;
 use egui_async::{Bind, EguiAsyncPlugin, StateWithData, bind::MaybeSend};
 use egui_flex::{Flex, item};
 use futures::future::MaybeDone;
-use image;
+use image::ImageBuffer;
+use image::Rgba;
 use reqwest::{Client, Error};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{self, Value};
@@ -28,6 +29,7 @@ use std::{
     },
 };
 
+use crate::app::Update::Boardupdate;
 use crate::http_client_helper;
 use crate::http_client_helper::{IdAndNameWrapper, LoginInfo};
 use crate::signalr_client_helper::{self};
@@ -231,13 +233,15 @@ impl WhiteboardApp {
         sender: Sender<Update>,
     ) {
         let image =
-            image::load_from_memory(&(BASE64_STANDARD.decode(&data.drawing).unwrap())).unwrap();
+            image::load_from_memory(&(BASE64_STANDARD.decode(&data.Drawing).unwrap())).unwrap();
         let size = [image.width() as _, image.height() as _];
         let image_buffer = image.to_rgba8();
         let pixels = image_buffer.as_flat_samples();
         let drawing = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+        let mut users: Vec<user> = Vec::new();
+        // for user_wrapper in data.currentEditors {}
         let mut images: Vec<Image> = Vec::new();
-        for image_wrapper in data.images {
+        for image_wrapper in data.Images {
             let image = image::load_from_memory_with_format(
                 &image_wrapper.File.as_bytes(),
                 image::ImageFormat::Png,
@@ -260,11 +264,11 @@ impl WhiteboardApp {
         }
         let mut permission = BoardPermission::Viewer;
         if let Some(login_info) = login {
-            if (login_info.id == data.ownerId) {
+            if (login_info.id == data.OwnerId) {
                 permission = BoardPermission::Owner;
             } else {
-                for user in &data.currentEditors {
-                    if (login_info.id == user.Id) {
+                for user in &data.CurrentEditors {
+                    if (login_info.id == user.id) {
                         permission = BoardPermission::Editor;
                         break;
                     }
@@ -273,13 +277,13 @@ impl WhiteboardApp {
         }
 
         let board = Whiteboard {
-            id: data.id,
-            ownerId: data.ownerId,
-            name: data.name,
+            id: data.Id,
+            ownerId: data.OwnerId,
+            name: data.Name,
             drawing_texture: context.load_texture("drawing", drawing.clone(), Default::default()),
-            drawing_Image: drawing,
-            currentEditors: data.currentEditors,
-            texts: data.texts,
+            drawing_buffer: image_buffer,
+            currentEditors: data.CurrentEditors,
+            texts: data.Texts,
             images: images,
             permission: permission,
         };
@@ -288,7 +292,9 @@ impl WhiteboardApp {
     }
 
     fn apply_board_update(&mut self, update: BoardUpdate) {
-        //TODO
+        for draw_update in update.draw_updates {
+            for pixel in draw_update.coords {}
+        }
     }
 }
 
@@ -332,9 +338,13 @@ impl eframe::App for WhiteboardApp {
                 }
             }
         }
-
+        if self.selected_board.id == 0 {
+            self.board_update_queue.clear();
+        }
         if let Some(Whiteboard) = &mut self.current_whiteboard {
-            while let Some(BoardUpdate) = self.board_update_queue.pop_front() {}
+            while let Some(board_update) = self.board_update_queue.pop_front() {
+                self.apply_board_update(board_update);
+            }
         }
 
         ctx.request_repaint();
@@ -408,18 +418,21 @@ impl eframe::App for WhiteboardApp {
         });
 
         egui::Panel::bottom("bottom_panel").show_inside(ui, |ui| {
-            ui.horizontal(|ui| match self.signalr_client.state() {
-                StateWithData::Finished(_) => {
-                    ui.label("connected");
-                }
-                StateWithData::Pending => {
-                    ui.label("connecting");
-                }
-                StateWithData::Failed(error) => {
-                    ui.label("connection error: ".to_owned() + error);
-                }
-                StateWithData::Idle => {
-                    self.connect_signalr();
+            ui.horizontal(|ui| {
+                ui.label("");
+                match self.signalr_client.state() {
+                    StateWithData::Finished(_) => {
+                        ui.label("connected");
+                    }
+                    StateWithData::Pending => {
+                        ui.label("connecting");
+                    }
+                    StateWithData::Failed(error) => {
+                        ui.label("connection error: ".to_owned() + error);
+                    }
+                    StateWithData::Idle => {
+                        self.connect_signalr();
+                    }
                 }
             });
         });
@@ -427,6 +440,13 @@ impl eframe::App for WhiteboardApp {
         egui::CentralPanel::default().show(ui, |ui| {
             if let Some(whiteboard) = &self.current_whiteboard {
                 egui::Panel::top("board_menu").show(ui, |ui| {
+                    egui::ScrollArea::horizontal().show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            for editor in &whiteboard.currentEditors {
+                                ui.label(&editor.name);
+                            }
+                        });
+                    });
                     if let BoardPermission::Viewer = whiteboard.permission {
                     } else {
                         menu::MenuBar::new().ui(ui, |ui| {
@@ -466,13 +486,61 @@ impl eframe::App for WhiteboardApp {
                                         } else {
                                             drawing = drawing.sense(Sense::drag());
                                         }
-                                        let res = ui.add(drawing);
+                                        let mut res = ui.add(drawing);
                                         match self.selected_tool {
                                             Tool::Navigate => {
                                                 res.on_hover_cursor(egui::CursorIcon::AllScroll);
                                             }
                                             Tool::Brush => {
-                                                res.on_hover_cursor(egui::CursorIcon::Default);
+                                                res =
+                                                    res.on_hover_cursor(egui::CursorIcon::Default);
+                                                if res.dragged() {
+                                                    let pos = ui
+                                                        .ctx()
+                                                        .layer_transform_from_global(
+                                                            ui.painter().layer_id(),
+                                                        )
+                                                        .unwrap_or_default()
+                                                        * ui.input(|i| {
+                                                            i.pointer
+                                                                .interact_pos()
+                                                                .unwrap_or_default()
+                                                        });
+                                                    // if let Some(pos) =
+                                                    //     ui.ctx().input(|i| i.pointer.interact_pos())
+                                                    // {
+                                                    // }
+                                                    println!("{}", pos);
+                                                    let mut coords: Vec<(u32, u32)> = Vec::new();
+                                                    let posx = pos.x.round() as i32;
+                                                    let posy = pos.y.round() as i32;
+                                                    let threshold = self.brush_size >> 1;
+                                                    for x in posx - self.brush_size
+                                                        ..posx + self.brush_size
+                                                    {
+                                                        if x < 0 || x > 5000 {
+                                                            continue;
+                                                        }
+                                                        let x_offset = (x - posx).abs() >> 1;
+                                                        for y in posy - self.brush_size
+                                                            ..posy + self.brush_size
+                                                        {
+                                                            if y < 0 || y > 5000 {
+                                                                continue;
+                                                            }
+                                                            let y_offset = (y - posy).abs() >> 1;
+                                                            if (x_offset + y_offset) < threshold {
+                                                                coords.push((x as u32, y as u32));
+                                                            }
+                                                        }
+                                                    }
+                                                    self.sender.send(Boardupdate(BoardUpdate {
+                                                        draw_updates: vec![DrawUpdate {
+                                                            color: self.current_color,
+                                                            coords: coords,
+                                                        }],
+                                                    }));
+                                                }
                                             }
                                             _ => {}
                                         }
@@ -519,8 +587,10 @@ impl eframe::App for WhiteboardApp {
                 && let None = self.current_whiteboard
             {
                 Flex::new().h_full().w_full().show(ui, |flex| {
-                    flex.add(item().grow(1_f32), Label::new("loading"));
+                    flex.add(item().grow(1_f32), Label::new(""));
+                    flex.add(item(), Label::new("loading"));
                     flex.add(item(), egui::Spinner::new());
+                    flex.add(item().grow(1_f32), Label::new(""));
                 });
             } else {
                 Flex::new().h_full().w_full().show(ui, |flex| {
@@ -601,20 +671,28 @@ impl eframe::App for WhiteboardApp {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
+//#[serde(rename_all = "lowercase")]
 pub struct OpenWhiteboardResponse {
-    id: i32,
-    ownerId: i32,
-    name: String,
-    drawing: String,
-    currentEditors: Vec<User>,
-    texts: Vec<Text>,
-    images: Vec<ImageWrapper>,
+    Id: i32,
+    OwnerId: i32,
+    Name: String,
+    Drawing: String,
+    CurrentEditors: Vec<user>,
+    Texts: Vec<Text>,
+    Images: Vec<ImageWrapper>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-pub struct User {
-    Id: i32,
-    Name: i32,
+#[serde(rename_all = "lowercase")]
+pub struct user {
+    id: i32,
+    name: String,
+}
+
+impl PartialEq for user {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -638,8 +716,8 @@ pub struct Whiteboard {
     ownerId: i32,
     name: String,
     drawing_texture: TextureHandle,
-    drawing_Image: ColorImage,
-    currentEditors: Vec<User>,
+    drawing_buffer: ImageBuffer<Rgba<u8>, Vec<u8>>,
+    currentEditors: Vec<user>,
     texts: Vec<Text>,
     images: Vec<Image>,
     permission: BoardPermission,
@@ -660,7 +738,12 @@ pub enum Update {
 }
 
 pub struct BoardUpdate {
-    //TODO
+    draw_updates: Vec<DrawUpdate>,
+}
+
+struct DrawUpdate {
+    color: Color32,
+    coords: Vec<(u32, u32)>,
 }
 
 #[derive(PartialEq)]
@@ -677,7 +760,7 @@ enum BoardPermission {
 
 pub fn spawn<F>(future: F)
 where
-    F: Future<Output = ()> + Send + 'static,
+    F: Future<Output = ()> + MaybeSend + 'static,
 {
     #[cfg(not(target_arch = "wasm32"))]
     tokio::task::spawn(future);

@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{Value, json};
 use signalr_client::{
     self, DisconnectionHandler, NoReconnectPolicy, ReconnectionConfig, SignalRClient,
 };
@@ -34,11 +34,23 @@ pub async fn connect(
 }
 
 pub async fn open_whiteboard(mut client: SignalRClient, id: i32, sender: Sender<Update>) {
-    let res = client
+    let test: Result<String, String> = client
         .invoke_with_args("OpenWhiteboard".to_owned(), |c| {
             c.argument(id);
         })
         .await;
+    let mut res = Err("".to_owned());
+    if let Ok(thing) = test {
+        // println!("{}", thing);
+        let stuff: OpenWhiteboardResponse = serde_json::from_str(&thing).unwrap();
+        res = Ok(stuff);
+        println!("{:?}", thing);
+    }
+    // let res = client
+    //     .invoke_with_args("OpenWhiteboard".to_owned(), |c| {
+    //         c.argument(id);
+    //     })
+    //     .await;
     match res {
         Ok(resp) => {
             sender.send(Update::Boardrecieved(resp));
