@@ -6,14 +6,14 @@ use egui::scroll_area::ScrollSource;
 use egui::{
     self, ColorImage, Context, Id, Modal, Popup, TextureHandle, epaint::TextureManager, widgets,
 };
-use egui::{Color32, DragPanButtons, Pos2, Rect, Response, Sense, menu};
+use egui::{Color32, DragPanButtons, Pos2, Rect, Response, Sense, TextureOptions, Vec2, menu};
 use egui::{Label, Plugin, mutex::RwLock};
 use egui_async::StateWithData::Finished;
 use egui_async::{Bind, EguiAsyncPlugin, StateWithData, bind::MaybeSend};
 use egui_flex::{Flex, item};
 use futures::future::MaybeDone;
-use image::ImageBuffer;
 use image::Rgba;
+use image::{ImageBuffer, Pixel};
 use reqwest::{Client, Error};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{self, Value};
@@ -30,6 +30,7 @@ use std::{
 };
 
 use crate::app::Update::Boardupdate;
+use crate::frame_history::FrameHistory;
 use crate::http_client_helper;
 use crate::http_client_helper::{IdAndNameWrapper, LoginInfo};
 use crate::signalr_client_helper::{self};
@@ -59,6 +60,7 @@ pub struct WhiteboardApp {
     scene_rect: Rect,
     current_color: Color32,
     brush_size: i32,
+    frame_history: crate::frame_history::FrameHistory,
 }
 
 impl WhiteboardApp {
@@ -92,6 +94,7 @@ impl WhiteboardApp {
             scene_rect: Rect::from_pos(Pos2::new(0_f32, 0_f32)),
             current_color: Color32::BLACK,
             brush_size: 5,
+            frame_history: FrameHistory::default(),
         };
         temp.refresh_boards();
         temp.connect_signalr();
@@ -276,12 +279,19 @@ impl WhiteboardApp {
             }
         }
 
+        let (draw_sender, reciever) = mpsc::channel::<Vec<DrawUpdate>>();
+        let drawing_buffer = drawing.clone();
+        let th = context.load_texture("drawing", drawing.clone(), Default::default());
+        let th2 = th.clone();
+        //spawn(async move { apply_draw_updates(reciever, th, drawing_buffer, size).await });
+
         let board = Whiteboard {
             id: data.Id,
             ownerId: data.OwnerId,
             name: data.Name,
-            drawing_texture: context.load_texture("drawing", drawing.clone(), Default::default()),
-            drawing_buffer: image_buffer,
+            drawing_texture: th2,
+            drawing_buffer: drawing_buffer,
+            size: size,
             currentEditors: data.CurrentEditors,
             texts: data.Texts,
             images: images,
@@ -292,14 +302,51 @@ impl WhiteboardApp {
     }
 
     fn apply_board_update(&mut self, update: BoardUpdate) {
-        for draw_update in update.draw_updates {
-            for pixel in draw_update.coords {}
+        if let Some(board) = &mut self.current_whiteboard {
+            for draw_update in update.draw_updates {
+                for (x, y) in draw_update.coords {
+                    board.drawing_buffer.pixels[(y as usize * board.size[0] + x) as usize] =
+                        draw_update.color;
+                }
+            }
+            board
+                .drawing_texture
+                .set(board.drawing_buffer.clone(), TextureOptions::NEAREST);
+            // board.drawing_texture.set(
+            //     egui::ColorImage::new(board.size, board.drawing_buffer.clone()),
+            //     TextureOptions::NEAREST,
+            // );
         }
     }
+
+    fn create_board_update(&mut self, action: Action) {
+        match action {
+            Action::Draw(draw_update) => {
+                let board_update = BoardUpdate {
+                    draw_updates: vec![draw_update],
+                };
+                self.apply_board_update(board_update);
+                // send update to server here
+            }
+            _ => {}
+        }
+    }
+
+    // fn apply_draw_updates(&mut self, updates: Vec<DrawUpdate>) {
+    //     // let pixels = drawing_buffer.as_flat_samples();
+    //     // let size = [5000_usize, 5000_usize];
+    //     // let drawing = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+    //     th.set(
+    //         egui::ColorImage::new(size, drawing_buffer.clone()),
+    //         TextureOptions::NEAREST,
+    //     );
+    // }
 }
 
 impl eframe::App for WhiteboardApp {
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.frame_history
+            .on_new_frame(ctx.input(|i| i.time), frame.info().cpu_usage);
         ctx.plugin_or_default::<egui_async::EguiAsyncPlugin>();
         let mut currently_logged_in = false;
         if let StateWithData::Finished(_) = self.login.state() {
@@ -419,6 +466,7 @@ impl eframe::App for WhiteboardApp {
 
         egui::Panel::bottom("bottom_panel").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
+                ui.label(format!("fps: {:.1}", self.frame_history.fps()));
                 ui.label("");
                 match self.signalr_client.state() {
                     StateWithData::Finished(_) => {
@@ -438,7 +486,7 @@ impl eframe::App for WhiteboardApp {
         });
 
         egui::CentralPanel::default().show(ui, |ui| {
-            if let Some(whiteboard) = &self.current_whiteboard {
+            if let Some(whiteboard) = &mut self.current_whiteboard {
                 egui::Panel::top("board_menu").show(ui, |ui| {
                     egui::ScrollArea::horizontal().show(ui, |ui| {
                         ui.horizontal(|ui| {
@@ -461,6 +509,7 @@ impl eframe::App for WhiteboardApp {
                         });
                     }
                 });
+                let mut action: Action = Action::None;
 
                 egui::CentralPanel::default()
                     // .frame(egui::Frame::new().fill(Color32::WHITE))
@@ -510,36 +559,16 @@ impl eframe::App for WhiteboardApp {
                                                     //     ui.ctx().input(|i| i.pointer.interact_pos())
                                                     // {
                                                     // }
-                                                    println!("{}", pos);
-                                                    let mut coords: Vec<(u32, u32)> = Vec::new();
-                                                    let posx = pos.x.round() as i32;
-                                                    let posy = pos.y.round() as i32;
-                                                    let threshold = self.brush_size >> 1;
-                                                    for x in posx - self.brush_size
-                                                        ..posx + self.brush_size
-                                                    {
-                                                        if x < 0 || x > 5000 {
-                                                            continue;
-                                                        }
-                                                        let x_offset = (x - posx).abs() >> 1;
-                                                        for y in posy - self.brush_size
-                                                            ..posy + self.brush_size
-                                                        {
-                                                            if y < 0 || y > 5000 {
-                                                                continue;
-                                                            }
-                                                            let y_offset = (y - posy).abs() >> 1;
-                                                            if (x_offset + y_offset) < threshold {
-                                                                coords.push((x as u32, y as u32));
-                                                            }
-                                                        }
-                                                    }
-                                                    self.sender.send(Boardupdate(BoardUpdate {
-                                                        draw_updates: vec![DrawUpdate {
-                                                            color: self.current_color,
-                                                            coords: coords,
-                                                        }],
-                                                    }));
+                                                    // println!("{}", pos);
+
+                                                    let delta = res.drag_delta();
+                                                    // println!("{}", delta);
+                                                    let brush_size = self.brush_size.clone();
+                                                    // let sender = self.sender.clone();
+                                                    let color = self.current_color.clone();
+                                                    action = Action::Draw(create_draw_update(
+                                                        brush_size, pos, color, delta,
+                                                    ));
                                                 }
                                             }
                                             _ => {}
@@ -549,6 +578,7 @@ impl eframe::App for WhiteboardApp {
                             })
                             .response;
                         response.on_hover_and_drag_cursor(egui::CursorIcon::AllScroll);
+
                         // if self.scene_rect.top() < 0_f32 {
                         //     self.scene_rect.set_top(0_f32);
                         // }
@@ -575,6 +605,8 @@ impl eframe::App for WhiteboardApp {
                         //     egui::load::SizedTexture::new(whiteboard.drawing.id(), size);
                         // ui.add(egui::Image::new(sized_texture).fit_to_exact_size(size));
                     });
+
+                self.create_board_update(action);
 
                 // egui::Frame::new().fill(Color32::GREEN).show(ui, |ui| {});
                 // let size = whiteboard.drawing.size_vec2();
@@ -716,7 +748,8 @@ pub struct Whiteboard {
     ownerId: i32,
     name: String,
     drawing_texture: TextureHandle,
-    drawing_buffer: ImageBuffer<Rgba<u8>, Vec<u8>>,
+    drawing_buffer: ColorImage,
+    size: [usize; 2],
     currentEditors: Vec<user>,
     texts: Vec<Text>,
     images: Vec<Image>,
@@ -743,10 +776,10 @@ pub struct BoardUpdate {
 
 struct DrawUpdate {
     color: Color32,
-    coords: Vec<(u32, u32)>,
+    coords: Vec<(usize, usize)>,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 enum Tool {
     Brush,
     Navigate,
@@ -758,6 +791,11 @@ enum BoardPermission {
     Viewer,
 }
 
+enum Action {
+    Draw(DrawUpdate),
+    None,
+}
+
 pub fn spawn<F>(future: F)
 where
     F: Future<Output = ()> + MaybeSend + 'static,
@@ -767,3 +805,124 @@ where
     #[cfg(target_arch = "wasm32")]
     wasm_bindgen_futures::spawn_local(future);
 }
+
+fn create_draw_update(brush_size: i32, pos: Pos2, color: Color32, drag_delta: Vec2) -> DrawUpdate {
+    let mut coords: Vec<(usize, usize)> = Vec::new();
+    let pos_x = pos.x.round() as i32;
+    let pos_y = pos.y.round() as i32;
+    let delta_x = pos_x - drag_delta.x as i32;
+    let delta_y = pos_y - drag_delta.y as i32;
+    let mut min_x = -brush_size;
+    let mut max_x = brush_size;
+    if delta_x < pos_x {
+        min_x += delta_x;
+        max_x += pos_x;
+    } else {
+        min_x += pos_x;
+        max_x += delta_x;
+    }
+    if min_x < 0 {
+        min_x = 0;
+    }
+    if max_x > 5000 {
+        max_x = 5000;
+    }
+    //println!("{},{}", min_x, max_x);
+    let mut min_y = -brush_size;
+    let mut max_y = brush_size;
+    if delta_y < pos_y {
+        min_y += delta_y;
+        max_y += pos_y;
+    } else {
+        min_y += pos_y;
+        max_y += delta_y;
+    }
+    if min_y < 0 {
+        min_y = 0;
+    }
+    if max_y > 5000 {
+        max_y = 5000;
+    }
+    let threshold = brush_size * brush_size;
+    for x in min_x..=max_x {
+        // if x < 0 || x > 5000 {
+        //     continue;
+        // }
+        let pos_x_distance = (x - pos_x).abs();
+        let delta_x_distance = (x - delta_x).abs();
+        let pos_x_offset = pos_x_distance * pos_x_distance;
+        let delta_x_offset = delta_x_distance * delta_x_distance;
+        for y in min_y..=max_y {
+            // if y < 0 || y > 5000 {
+            //     continue;
+            // }
+            let pos_y_distance = (y - pos_y).abs();
+            let delta_y_distance = (y - delta_y).abs();
+            let pos_y_offset = pos_y_distance * pos_y_distance;
+            let delta_y_offset = delta_y_distance * delta_y_distance;
+            let pos_offset = pos_x_offset + pos_y_offset;
+            let delta_offset = delta_x_offset + delta_y_offset;
+            if (pos_offset < threshold
+                || delta_offset < threshold
+                || (pos_offset - delta_offset).abs() < brush_size)
+            {
+                coords.push((x as usize, y as usize));
+            }
+        }
+    }
+    DrawUpdate {
+        color: color,
+        coords: coords,
+    }
+}
+
+// async fn apply_draw_updates(
+//     reciever: Receiver<Vec<DrawUpdate>>,
+//     mut th: TextureHandle,
+//     mut drawing_buffer: Vec<egui::Color32>,
+//     size: [usize; 2],
+// ) {
+//     while let Ok(msg) = reciever.recv() {
+//         for draw_update in msg {
+//             for (x, y) in draw_update.coords {
+//                 drawing_buffer[(y as usize * size[0] + x) as usize] = draw_update.color;
+//             }
+//         }
+
+//         // let pixels = drawing_buffer.as_flat_samples();
+//         // let size = [5000_usize, 5000_usize];
+//         // let drawing = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+//         th.set(
+//             egui::ColorImage::new(size, drawing_buffer.clone()),
+//             TextureOptions::NEAREST,
+//         );
+//     }
+// // }
+
+// fn create_draw_update(pos: Pos2, color: Color32, brush_size: i32) -> DrawUpdate {
+//     let mut coords: Vec<(usize, usize)> = Vec::new();
+//     let posx = pos.x.round() as i32;
+//     let posy = pos.y.round() as i32;
+//     let threshold = brush_size * brush_size;
+//     for x in posx - brush_size..posx + brush_size {
+//         if x < 0 || x > 5000 {
+//             continue;
+//         }
+//         let x_distance = (x - posx).abs();
+//         let x_offset = x_distance * x_distance;
+//         for y in posy - brush_size..posy + brush_size {
+//             if y < 0 || y > 5000 {
+//                 continue;
+//             }
+//             let y_distance = (y - posy).abs();
+//             let y_offset = y_distance * y_distance;
+//             if (x_offset + y_offset) < threshold {
+//                 coords.push((x as usize, y as usize));
+//             }
+//         }
+//     }
+//     DrawUpdate {
+//         color: color,
+//         coords: coords,
+//     }
+// }
