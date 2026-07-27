@@ -305,13 +305,12 @@ impl WhiteboardApp {
         if let Some(board) = &mut self.current_whiteboard {
             for draw_update in update.draw_updates {
                 for (x, y) in draw_update.coords {
-                    board.drawing_buffer.pixels[(y as usize * board.size[0] + x) as usize] =
-                        draw_update.color;
+                    board.drawing_buffer.pixels[(y * board.size[0] + x)] = draw_update.color;
                 }
             }
-            board
-                .drawing_texture
-                .set(board.drawing_buffer.clone(), TextureOptions::NEAREST);
+            // board
+            //     .drawing_texture
+            //     .set(board.drawing_buffer.clone(), TextureOptions::NEAREST);
             // board.drawing_texture.set(
             //     egui::ColorImage::new(board.size, board.drawing_buffer.clone()),
             //     TextureOptions::NEAREST,
@@ -388,7 +387,7 @@ impl eframe::App for WhiteboardApp {
         if self.selected_board.id == 0 {
             self.board_update_queue.clear();
         }
-        if let Some(Whiteboard) = &mut self.current_whiteboard {
+        if let Some(board) = &mut self.current_whiteboard {
             while let Some(board_update) = self.board_update_queue.pop_front() {
                 self.apply_board_update(board_update);
             }
@@ -398,6 +397,11 @@ impl eframe::App for WhiteboardApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if let Some(board) = &mut self.current_whiteboard {
+            board
+                .drawing_texture
+                .set(board.drawing_buffer.clone(), TextureOptions::LINEAR);
+        }
         let previous_board = self.selected_board.clone();
         if let StateWithData::Finished(new_boards) = self.new_board_list.state() {
             self.board_list = new_boards.clone();
@@ -812,20 +816,19 @@ fn create_draw_update(brush_size: i32, pos: Pos2, color: Color32, drag_delta: Ve
     let pos_y = pos.y.round() as i32;
     let delta_x = pos_x - drag_delta.x as i32;
     let delta_y = pos_y - drag_delta.y as i32;
-    let x_distance = drag_delta.x.abs();
-    let y_distance = drag_delta.y.abs();
+    let delta_edge_1 = pos + (drag_delta.normalized().rot90() * brush_size as f32);
+    let delta_edge_2 = pos - (drag_delta.normalized().rot90() * brush_size as f32);
+    let x_distance = drag_delta.x;
+    let y_distance = drag_delta.y;
     let mut min_x = -brush_size;
     let mut max_x = brush_size;
-    let mut x_to_y_ratio = delta_x / pos_y;
     if delta_x < pos_x {
         min_x += delta_x;
         max_x += pos_x;
-        x_to_y_ratio = pos_x / delta_y;
     } else {
         min_x += pos_x;
         max_x += delta_x;
     }
-    let smaller_x = min_x + brush_size;
     if min_x < 0 {
         min_x = 0;
     }
@@ -835,16 +838,13 @@ fn create_draw_update(brush_size: i32, pos: Pos2, color: Color32, drag_delta: Ve
     //println!("{},{}", min_x, max_x);
     let mut min_y = -brush_size;
     let mut max_y = brush_size;
-    let mut y_to_x_ratio = delta_y / pos_x;
     if delta_y < pos_y {
         min_y += delta_y;
         max_y += pos_y;
-        y_to_x_ratio = pos_y / delta_x;
     } else {
         min_y += pos_y;
         max_y += delta_y;
     }
-    let smaller_y = min_y + brush_size;
     if min_y < 0 {
         min_y = 0;
     }
@@ -856,44 +856,55 @@ fn create_draw_update(brush_size: i32, pos: Pos2, color: Color32, drag_delta: Ve
         // if x < 0 || x > 5000 {
         //     continue;
         // }
-        let pos_x_distance = (x - pos_x).abs();
-        let delta_x_distance = (x - delta_x).abs();
+        let pos_x_distance = (x - pos_x);
+        let delta_x_distance = (x - delta_x);
         let pos_x_offset = pos_x_distance * pos_x_distance;
         let delta_x_offset = delta_x_distance * delta_x_distance;
-        let x_difference = (pos_x_distance - delta_x_distance).abs();
+        let x_difference = (pos_x_distance - delta_x_distance);
         let x_offset = x_difference * x_difference;
         let x_between = min_x + brush_size < x && x < max_x - brush_size;
-        let to_smaller_x = (x - smaller_x) as f32;
         for y in min_y..=max_y {
             // if y < 0 || y > 5000 {
             //     continue;
             // }
-            let pos_y_distance = (y - pos_y).abs();
-            let delta_y_distance = (y - delta_y).abs();
+            //
+            let pos_y_distance = (y - pos_y);
+            let delta_y_distance = (y - delta_y);
             let pos_y_offset = pos_y_distance * pos_y_distance;
             let delta_y_offset = delta_y_distance * delta_y_distance;
-            let y_difference = (pos_y_distance - delta_y_distance).abs();
+            let y_difference = (pos_y_distance - delta_y_distance);
             let y_offset = y_difference * y_difference;
             let pos_offset = pos_x_offset + pos_y_offset;
             let delta_offset = delta_x_offset + delta_y_offset;
-            let pos_average = (pos_x_distance + pos_y_distance) / 2;
-            let delta_average = (delta_x_distance + delta_y_distance) / 2;
-            let pos_ratio = pos_x / pos_y;
-            let delta_ratio = delta_x / delta_y;
-            let ratio_difference = (pos_ratio - delta_ratio).abs();
-            let ratio_average = (pos_ratio + delta_ratio) / 2;
-            let xy_ratio = x as f32 / y as f32;
-            let yx_ratio = y as f32 / x as f32;
-            let y_between = min_y + brush_size < y && y < max_y - brush_size;
-            let to_smaller_y = (y - smaller_y) as f32;
-            let in_range = ((x_distance / y_distance).abs() - (to_smaller_x / to_smaller_y).abs()).abs()
-                < 1_f32
-                && ((y_distance / x_distance).abs() - (to_smaller_y / to_smaller_x).abs()).abs() < 1_f32;
 
-            if (pos_offset < threshold
-                || delta_offset < threshold
-                || (x_between && y_between && in_range))
-            {
+            let y_between = min_y + brush_size < y && y < max_y - brush_size;
+            // let vec = drag_delta.normalized().rot90();
+            // let neg_x = (x as f32 - (vec.x * brush_size as f32)) - delta_x as f32;
+            // let neg_y = (y as f32 - (vec.y * brush_size as f32)) - delta_y as f32;
+            // let neg_ratio = neg_x / neg_y;
+            // let po_x = (x as f32 + (vec.x * brush_size as f32)) - delta_x as f32;
+            // let po_y = (y as f32 + (vec.y * brush_size as f32)) - delta_y as f32;
+            // let po_ratio = po_x / po_y;
+            // let xy_ratio = x as f32 / y as f32;
+            // let mut lower_ratio = neg_ratio;
+            // let mut higher_ratio = po_ratio;
+            // if po_ratio < neg_ratio {
+            //     lower_ratio = po_ratio;
+            //     higher_ratio = neg_ratio;
+            // }
+
+            // let on_line = neg_ratio < ((x_distance) / (y_distance))
+            //     && po_ratio > ((x_distance) / (y_distance));
+
+            let current_pos = Pos2::new(x as f32, y as f32);
+
+            let lengh = delta_x_distance as f32 / drag_delta.normalized().x;
+            let moved_y = (y as f32 * drag_delta.normalized().y * lengh);
+            let angle_1 = (current_pos - delta_edge_1).angle();
+            let angle_2 = (current_pos - delta_edge_2).angle();
+            // let on_line = (angle_1 < drag_delta.angle() && drag_delta);
+
+            if (pos_offset < threshold || delta_offset < threshold || on_line) {
                 coords.push((x as usize, y as usize));
             }
         }
