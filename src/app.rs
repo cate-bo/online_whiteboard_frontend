@@ -904,7 +904,7 @@ fn create_draw_update(brush_size: i32, pos: Pos2, color: Color32, drag_delta: Ve
             let angle_2 = (current_pos - delta_edge_2).angle();
             // let on_line = (angle_1 < drag_delta.angle() && drag_delta);
 
-            if (pos_offset < threshold || delta_offset < threshold || on_line) {
+            if (pos_offset < threshold || delta_offset < threshold) {
                 coords.push((x as usize, y as usize));
             }
         }
