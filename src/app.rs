@@ -185,7 +185,7 @@ impl WhiteboardApp {
     }
 
     fn user_menu(&mut self, ui: &mut egui::Ui) {
-        ui.label("worky");
+        // ui.label("worky");
         if (ui.button("LOG OUT").clicked()) {
             let client = self.http_client.clone();
             let mut throwaway = Bind::new(false);
@@ -434,9 +434,9 @@ impl eframe::App for WhiteboardApp {
                         }
                     });
 
-                ui.menu_button("settings", |ui| {
-                    ui.label("lalala");
-                });
+                // ui.menu_button("settings", |ui| {
+                //     ui.label("lalala");
+                // });
                 match &self.login.state() {
                     StateWithData::Finished(info) => {
                         let user_button_thing = ui.button(&info.userName);
@@ -456,15 +456,15 @@ impl eframe::App for WhiteboardApp {
                             .show(|ui| self.login_or_register_menu(ui));
                     }
                 }
-                ui.menu_button("tests", |ui| {
-                    if ui.button("test1").clicked() {
-                        if let StateWithData::Finished(client) = self.signalr_client.state() {
-                            let c = client.clone();
-                            self.test
-                                .request(async move { signalr_client_helper::test(c).await })
-                        }
-                    }
-                });
+                // ui.menu_button("tests", |ui| {
+                //     if ui.button("test1").clicked() {
+                //         if let StateWithData::Finished(client) = self.signalr_client.state() {
+                //             let c = client.clone();
+                //             self.test
+                //                 .request(async move { signalr_client_helper::test(c).await })
+                //         }
+                //     }
+                // });
             });
         });
 
